@@ -4,12 +4,62 @@ import pyautogui
 from PIL import Image
 import time
 
-def sort_ocr_results(texts, scores, boxes, y_thresh=15):
+def detect_columns(items, x_thresh=10):
+    """
+    基于 x 坐标聚类检测列
+    
+    参数:
+        items: 文本块列表，每个包含 box [x1, y1, x2, y2]
+        x_thresh: 列聚类阈值，单位像素
+    
+    返回:
+        列列表，每列包含该列的所有文本块
+    """
+    # 先按 x1 排序
+    items_sorted = sorted(items, key=lambda x: x["box"][0])
+    
+    # 列聚类：把 x 接近的归为一列
+    columns = []
+    for it in items_sorted:
+        placed = False
+        for col in columns:
+            # 用当前列的平均 x1 来判断是否同一列
+            if abs(it["box"][0] - col["x1_mean"]) < x_thresh:
+                col["items"].append(it)
+                # 更新均值
+                col["x1_mean"] = np.mean([p["box"][0] for p in col["items"]])
+                placed = True
+                break
+        if not placed:
+            columns.append({"x1_mean": it["box"][0], "items": [it]})
+    
+    # 按列的平均 x 坐标排序（从左到右）
+    columns.sort(key=lambda x: x["x1_mean"])
+    
+    # 对每列内的文本块按y1排序（从上到下）
+    for col in columns:
+        col["items"].sort(key=lambda x: x["box"][1])
+    
+    print("\n=== 列检测结果 ===")
+    for i, col in enumerate(columns):
+        print(f"\n第 {i+1} 列:")
+        print(f"  平均 x1: {col['x1_mean']:.2f}")
+        print(f"  文本块数量: {len(col['items'])}")
+        print(f"  文本块内容:")
+        for item in col["items"]:
+            print(f"    - 文本: {item['text']}")
+            print(f"      坐标: x1={item['box'][0]:.1f}, y1={item['box'][1]:.1f}, x2={item['box'][2]:.1f}, y2={item['box'][3]:.1f}")
+    
+    return columns
+
+
+def sort_ocr_results(texts, scores, boxes, y_thresh=15, x_thresh=50):
     """
     texts: list[str]
     scores: np.ndarray or list[float]
     boxes: np.ndarray shape [N, 4]  => [x_min, y_min, x_max, y_max] (PaddleOCR 3.x rec_boxes)
     y_thresh: 行分组阈值，单位像素，适当调大调小
+    x_thresh: 列分组阈值，单位像素，用于检测多列布局
     """
     items = []
     for i in range(len(texts)):
@@ -27,35 +77,42 @@ def sort_ocr_results(texts, scores, boxes, y_thresh=15):
             "y1": y1
         })
 
-    # 先按 y1 排一下，方便行聚类
-    items.sort(key=lambda x: x["y1"])
-
-    # 行聚类：把 y 接近的归为一行
-    lines = []
-    for it in items:
-        placed = False
-        for line in lines:
-            # 用当前行的平均 cy 来判断是否同一行
-            if abs(it["cy"] - line["cy_mean"]) < y_thresh:
-                line["items"].append(it)
-                # 更新均值
-                line["cy_mean"] = np.mean([p["cy"] for p in line["items"]])
-                placed = True
-                break
-        if not placed:
-            lines.append({"cy_mean": it["cy"], "items": [it]})
-
-    # 行内按 x 排序
-    for line in lines:
-        line["items"].sort(key=lambda x: x["cx"])
-
-    # 行按 y 排序
-    lines.sort(key=lambda x: x["cy_mean"])
-
-    # 展平
+    # 第一步：检测列
+    columns = detect_columns(items, x_thresh=x_thresh)
+    
+    # 第二步：对每列单独进行行聚类和排序
     sorted_items = []
-    for line in lines:
-        sorted_items.extend(line["items"])
+    for col in columns:
+        col_items = col["items"]
+        
+        # 先按 y1 排一下，方便行聚类
+        col_items.sort(key=lambda x: x["y1"])
+
+        # 行聚类：把 y 接近的归为一行
+        lines = []
+        for it in col_items:
+            placed = False
+            for line in lines:
+                # 用当前行的平均 cy 来判断是否同一行
+                if abs(it["cy"] - line["cy_mean"]) < y_thresh:
+                    line["items"].append(it)
+                    # 更新均值
+                    line["cy_mean"] = np.mean([p["cy"] for p in line["items"]])
+                    placed = True
+                    break
+            if not placed:
+                lines.append({"cy_mean": it["cy"], "items": [it]})
+
+        # 行内按 x 排序
+        for line in lines:
+            line["items"].sort(key=lambda x: x["cx"])
+
+        # 行按 y 排序
+        lines.sort(key=lambda x: x["cy_mean"])
+
+        # 展平该列的结果
+        for line in lines:
+            sorted_items.extend(line["items"])
 
     return sorted_items
 
