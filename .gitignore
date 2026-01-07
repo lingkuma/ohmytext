@@ -2,3 +2,4 @@ output/
 test_img/
 result/
 *.png
+__pycache__/

@@ -339,6 +339,17 @@ def process_screenshot(screenshot_path):
         sorted_items = sort_ocr_results(texts, scores, boxes, y_thresh=18)
         merged_paragraphs = merge_paragraphs(sorted_items, gap_coefficient=1.2)
         
+        print("\n" + "=" * 80)
+        print(f"合并完成！共得到 {len(merged_paragraphs)} 个段落:")
+        print("=" * 80)
+        
+        for i, para in enumerate(merged_paragraphs):
+            print(f"\n【段落 {i+1}】")
+            print(f"文本: {para['text']}")
+            print(f"坐标: x1={para['box'][0]:.1f}, y1={para['box'][1]:.1f}, x2={para['box'][2]:.1f}, y2={para['box'][3]:.1f}")
+            print(f"包含 {len(para['children'])} 个文本块")
+            print(f"高度: {para['height']:.1f}, 宽度: {para['width']:.1f}")
+        
         return merged_paragraphs
     
     return []
