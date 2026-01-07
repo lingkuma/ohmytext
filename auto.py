@@ -3,6 +3,7 @@ import keyboard
 import pyautogui
 from PIL import Image
 import time
+import pyperclip
 
 def detect_columns(items, x_thresh=10):
     """
@@ -392,6 +393,9 @@ def on_f4_pressed():
         print(f"文本: {largest_para['text']}")
         print(f"坐标: {largest_para['box']}")
         print(f"包含 {len(largest_para['children'])} 个文本块")
+        
+        pyperclip.copy(largest_para['text'])
+        print(f"\n文本已写入剪切板")
     else:
         print("\n鼠标位置下未找到文本段落")
 
