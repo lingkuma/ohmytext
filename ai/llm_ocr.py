@@ -36,14 +36,20 @@ def capture_screenshot_around_mouse(width=1400, height=800):
 def ocr_with_gemini(image, api_key, timeout=30):
     genai.configure(api_key=api_key)
     
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    #model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.0-flash-lite')
     
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
     img_byte_arr = img_byte_arr.getvalue()
     
     #prompt = "OCR图中德语，不同的句子（图中一般都是不同的对话框或区域）之间用换行隔开，每个句子最后整理成无换行的文本。忽略其他非德语文本。"
-    prompt = "获取图片中心主要德语文本段落的OCR，主要是中心（或距离鼠标最近）的那个文本框，注意区分不同的文本框，只需要返回中心的或距离鼠标最近的文本框，不需要处理其他文本框，最后整理成无换行的文本。忽略其他所有文本，忽略其他非德语文本。"
+    prompt = """
+    获取图片中心主要德语文本段落的OCR，主要是中心（或距离鼠标最近）的那个文本框，注意区分不同的文本框;
+    只需要返回中心的或距离鼠标最近的文本框，不需要处理其他文本框，最后整理成无换行的文本;
+    对于偶尔不是文本框的内容，比如药品介绍等，请根据原始格式和换行输出对应的大纲等，
+    忽略其他所有文本，忽略其他非德语文本。
+    """
 
     result_queue = queue.Queue()
     
