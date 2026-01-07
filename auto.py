@@ -1,4 +1,8 @@
 import numpy as np
+import keyboard
+import pyautogui
+from PIL import Image
+import time
 
 def sort_ocr_results(texts, scores, boxes, y_thresh=15):
     """
@@ -186,36 +190,164 @@ def merge_paragraphs(sorted_items, gap_coefficient=1.2, height_consistency_check
     return results
 
 
-# ====== 你原来的 OCR 代码 ======
+def capture_screenshot_around_mouse(width=1400, height=800):
+    """
+    以鼠标为中心截图
+    
+    参数:
+        width: 截图宽度
+        height: 截图高度
+    
+    返回:
+        PIL Image对象
+    """
+    # 获取鼠标位置
+    mouse_x, mouse_y = pyautogui.position()
+    
+    # 计算截图区域的左上角坐标
+    left = mouse_x - width // 2
+    top = mouse_y - height // 2
+    
+    # 获取屏幕尺寸
+    screen_width, screen_height = pyautogui.size()
+    
+    # 确保截图区域在屏幕范围内
+    if left < 0:
+        left = 0
+    if top < 0:
+        top = 0
+    if left + width > screen_width:
+        left = screen_width - width
+    if top + height > screen_height:
+        top = screen_height - height
+    
+    # 截图
+    screenshot = pyautogui.screenshot(region=(left, top, width, height))
+    
+    return screenshot, (left, top)
+
+
+def find_largest_paragraph_at_mouse(mouse_x, mouse_y, merged_paragraphs, screenshot_offset):
+    """
+    找到鼠标位置下最大的段落矩形
+    
+    参数:
+        mouse_x: 鼠标屏幕X坐标
+        mouse_y: 鼠标屏幕Y坐标
+        merged_paragraphs: 合并后的段落列表
+        screenshot_offset: 截图偏移量 (left, top)
+    
+    返回:
+        最大的段落，如果没有则返回None
+    """
+    offset_left, offset_top = screenshot_offset
+    
+    # 将鼠标屏幕坐标转换为截图内的相对坐标
+    relative_x = mouse_x - offset_left
+    relative_y = mouse_y - offset_top
+    
+    # 找到所有包含鼠标位置的段落
+    matching_paragraphs = []
+    for para in merged_paragraphs:
+        x1, y1, x2, y2 = para["box"]
+        if x1 <= relative_x <= x2 and y1 <= relative_y <= y2:
+            matching_paragraphs.append(para)
+    
+    if not matching_paragraphs:
+        return None
+    
+    # 找到面积最大的段落
+    largest_para = max(matching_paragraphs, key=lambda p: (p["box"][2] - p["box"][0]) * (p["box"][3] - p["box"][1]))
+    
+    return largest_para
+
+
+def process_screenshot(screenshot_path):
+    """
+    处理截图，执行OCR并返回合并后的段落
+    
+    参数:
+        screenshot_path: 截图文件路径
+    
+    返回:
+        合并后的段落列表
+    """
+    result = ocr.predict(screenshot_path)
+    
+    for r in result:
+        texts = r["rec_texts"]
+        scores = r["rec_scores"]
+        boxes = r["rec_boxes"]
+        
+        sorted_items = sort_ocr_results(texts, scores, boxes, y_thresh=18)
+        merged_paragraphs = merge_paragraphs(sorted_items, gap_coefficient=1.2)
+        
+        return merged_paragraphs
+    
+    return []
+
+
+def on_f4_pressed():
+    """
+    F4键按下时的处理函数
+    """
+    print("\n=== F4 按下，开始处理 ===")
+    
+    # 获取鼠标位置
+    mouse_x, mouse_y = pyautogui.position()
+    print(f"鼠标位置: ({mouse_x}, {mouse_y})")
+    
+    # 截图
+    screenshot, offset = capture_screenshot_around_mouse(1400, 800)
+    screenshot_path = "./temp_screenshot.png"
+    screenshot.save(screenshot_path)
+    print(f"截图已保存: {screenshot_path}")
+    print(f"截图偏移: {offset}")
+    
+    # OCR处理
+    print("正在进行OCR识别...")
+    merged_paragraphs = process_screenshot(screenshot_path)
+    
+    if not merged_paragraphs:
+        print("未识别到任何文本")
+        return
+    
+    # 找到鼠标下最大的段落
+    largest_para = find_largest_paragraph_at_mouse(mouse_x, mouse_y, merged_paragraphs, offset)
+    
+    if largest_para:
+        print("\n=== 识别结果 ===")
+        print(f"文本: {largest_para['text']}")
+        print(f"坐标: {largest_para['box']}")
+        print(f"包含 {len(largest_para['children'])} 个文本块")
+    else:
+        print("\n鼠标位置下未找到文本段落")
+
+
+def main():
+    """
+    主函数，监听F4快捷键
+    """
+    print("程序已启动，按F4键进行截图识别...")
+    print("按Ctrl+C退出程序")
+    
+    try:
+        keyboard.add_hotkey('f4', on_f4_pressed)
+        keyboard.wait('esc')
+    except KeyboardInterrupt:
+        print("\n程序已退出")
+
+
+# ====== OCR 初始化 ======
 from paddleocr import PaddleOCR
 
 ocr = PaddleOCR(
     lang="de",
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
-    use_textline_orientation=True,   # 建议开着
+    use_textline_orientation=True,
 )
 
-result = ocr.predict("./test_img/test1.png")
-
-for r in result:
-    texts = r["rec_texts"]
-    scores = r["rec_scores"]
-    boxes = r["rec_boxes"]  # [N,4]
-
-    sorted_items = sort_ocr_results(texts, scores, boxes, y_thresh=18)
-    
-    # 使用智能段落合并算法
-    merged_paragraphs = merge_paragraphs(sorted_items, gap_coefficient=1.2)
-
-    # 打印按阅读顺序排好的结果
-    for it in sorted_items:
-        if it["text"].strip():
-            print(f'{it["text"]}  ({it["score"]:.3f})')
-    
-    print("\n=== 合并后的段落 ===")
-    for para in merged_paragraphs:
-        print(f"段落: {para['text']}")
-        print(f"坐标: {para['box']}")
-        print(f"包含 {len(para['children'])} 个文本块")
-        print()
+# 运行主程序
+if __name__ == "__main__":
+    main()
