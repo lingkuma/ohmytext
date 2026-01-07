@@ -80,8 +80,8 @@ def sort_ocr_results(texts, scores, boxes, y_thresh=15, x_thresh=50):
     # 第一步：检测列
     columns = detect_columns(items, x_thresh=x_thresh)
     
-    # 第二步：对每列单独进行行聚类和排序
-    sorted_items = []
+    # 第二步：对每列单独进行行聚类、排序和合并
+    all_merged_paragraphs = []
     for col in columns:
         col_items = col["items"]
         
@@ -111,10 +111,15 @@ def sort_ocr_results(texts, scores, boxes, y_thresh=15, x_thresh=50):
         lines.sort(key=lambda x: x["cy_mean"])
 
         # 展平该列的结果
+        col_sorted_items = []
         for line in lines:
-            sorted_items.extend(line["items"])
+            col_sorted_items.extend(line["items"])
+        
+        # 对该列进行段落合并
+        col_merged_paragraphs = merge_paragraphs(col_sorted_items, gap_coefficient=1.2)
+        all_merged_paragraphs.extend(col_merged_paragraphs)
 
-    return sorted_items
+    return all_merged_paragraphs
 
 
 def merge_paragraphs(sorted_items, gap_coefficient=1.2, height_consistency_check=True, horizontal_alignment_check=True):
@@ -336,8 +341,7 @@ def process_screenshot(screenshot_path):
         scores = r["rec_scores"]
         boxes = r["rec_boxes"]
         
-        sorted_items = sort_ocr_results(texts, scores, boxes, y_thresh=18)
-        merged_paragraphs = merge_paragraphs(sorted_items, gap_coefficient=1.2)
+        merged_paragraphs = sort_ocr_results(texts, scores, boxes, y_thresh=18)
         
         print("\n" + "=" * 80)
         print(f"合并完成！共得到 {len(merged_paragraphs)} 个段落:")
