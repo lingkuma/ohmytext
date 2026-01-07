@@ -3,3 +3,4 @@ test_img/
 result/
 *.png
 __pycache__/
+.env
