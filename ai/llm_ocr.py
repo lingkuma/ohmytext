@@ -6,6 +6,8 @@ import os
 import pyperclip
 import google.generativeai as genai
 from dotenv import load_dotenv
+import threading
+import queue
 
 load_dotenv()
 
@@ -31,7 +33,7 @@ def capture_screenshot_around_mouse(width=1400, height=800):
     return screenshot, (left, top)
 
 
-def ocr_with_gemini(image, api_key):
+def ocr_with_gemini(image, api_key, timeout=30):
     genai.configure(api_key=api_key)
     
     model = genai.GenerativeModel('gemini-2.0-flash')
@@ -40,18 +42,38 @@ def ocr_with_gemini(image, api_key):
     image.save(img_byte_arr, format='PNG')
     img_byte_arr = img_byte_arr.getvalue()
     
-    #prompt = "获取图片中心主要德语文本段落的OCR，主要是中心（或距离鼠标最近）的那个文本框，注意区分不同的文本框，只需要返回中心的或距离鼠标最近的文本框，不需要处理其他文本框，最后整理成无换行的文本。忽略其他所有文本，忽略其他非德语文本。"
-    prompt = "OCR图中德语，不同的句子（图中一般都是不同的对话框或区域）之间用换行隔开，每个句子最后整理成无换行的文本。忽略其他非德语文本。"
+    #prompt = "OCR图中德语，不同的句子（图中一般都是不同的对话框或区域）之间用换行隔开，每个句子最后整理成无换行的文本。忽略其他非德语文本。"
+    prompt = "获取图片中心主要德语文本段落的OCR，主要是中心（或距离鼠标最近）的那个文本框，注意区分不同的文本框，只需要返回中心的或距离鼠标最近的文本框，不需要处理其他文本框，最后整理成无换行的文本。忽略其他所有文本，忽略其他非德语文本。"
 
+    result_queue = queue.Queue()
+    
+    def ocr_worker():
+        try:
+            response = model.generate_content([
+                prompt,
+                {"mime_type": "image/png", "data": img_byte_arr}
+            ])
+            result_queue.put(("success", response.text.strip()))
+        except Exception as e:
+            result_queue.put(("error", str(e)))
+    
+    thread = threading.Thread(target=ocr_worker)
+    thread.start()
+    thread.join(timeout=timeout)
+    
+    if thread.is_alive():
+        print(f"OCR识别超时（{timeout}秒），已取消请求")
+        return None
+    
     try:
-        response = model.generate_content([
-            prompt,
-            {"mime_type": "image/png", "data": img_byte_arr}
-        ])
-        
-        return response.text.strip()
-    except Exception as e:
-        print(f"Gemini OCR 错误: {e}")
+        status, result = result_queue.get_nowait()
+        if status == "success":
+            return result
+        else:
+            print(f"Gemini OCR 错误: {result}")
+            return None
+    except queue.Empty:
+        print("OCR识别失败：未获取到结果")
         return None
 
 
@@ -69,8 +91,14 @@ def on_f4_pressed():
         print("错误: 未找到 GEMINI_API_KEY 环境变量")
         return
     
-    print("正在进行OCR识别...")
-    ocr_text = ocr_with_gemini(screenshot, api_key)
+    timeout_str = os.getenv('OCR_TIMEOUT', '30')
+    try:
+        timeout = int(timeout_str)
+    except ValueError:
+        timeout = 30
+    
+    print(f"正在进行OCR识别（超时设置: {timeout}秒）...")
+    ocr_text = ocr_with_gemini(screenshot, api_key, timeout)
     
     if ocr_text:
         print(f"\n=== 识别结果 ===")
