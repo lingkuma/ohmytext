@@ -4,9 +4,11 @@ from PIL import Image, ImageDraw
 import time
 import os
 import numpy as np
-from paddleocr import TextDetection
+import pyperclip
+from paddleocr import TextDetection, TextRecognition
 
 model = TextDetection(model_name="PP-OCRv5_server_det")
+rec_model = TextRecognition(model_name="latin_PP-OCRv5_mobile_rec")
 
 
 def detect_columns(items, x_thresh=10):
@@ -270,11 +272,105 @@ def capture_full_screen():
     return screenshot
 
 
+def recognize_merged_paragraphs(image_path, merged_paragraphs):
+    """
+    对合并后的段落进行 OCR 识别
+    
+    参数:
+        image_path: 原始图片路径
+        merged_paragraphs: 合并后的段落列表
+    
+    返回:
+        识别后的段落列表，每个段落添加了 'text' 字段
+    """
+    image = Image.open(image_path)
+    
+    print("\n" + "=" * 80)
+    print("开始对合并后的段落进行 OCR 识别...")
+    print("=" * 80)
+    
+    for i, para in enumerate(merged_paragraphs):
+        x1, y1, x2, y2 = para["box"]
+        
+        cropped_image = image.crop((x1, y1, x2, y2))
+        
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        cropped_path = f"./output/paragraph_{timestamp}_{i+1}.png"
+        cropped_image.save(cropped_path)
+        
+        print(f"\n【段落 {i+1}】")
+        print(f"裁切区域: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
+        print(f"裁切图片已保存: {cropped_path}")
+        
+        try:
+            output = rec_model.predict(input=cropped_path, batch_size=1)
+            
+            text_list = []
+            for res in output:
+                if 'texts' in res:
+                    text_list.extend(res['texts'])
+            
+            para['text'] = ' '.join(text_list)
+            
+            print(f"识别结果: {para['text']}")
+        except Exception as e:
+            print(f"识别失败: {e}")
+            para['text'] = ""
+    
+    return merged_paragraphs
+
+
+def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
+    """
+    找到鼠标下或最近的文本段落
+    
+    参数:
+        merged_paragraphs: 合并后的段落列表
+        mouse_x: 鼠标 x 坐标
+        mouse_y: 鼠标 y 坐标
+    
+    返回:
+        鼠标下的段落或最近的段落，如果没有则返回 None
+    """
+    print(f"\n鼠标位置: ({mouse_x}, {mouse_y})")
+    
+    for para in merged_paragraphs:
+        x1, y1, x2, y2 = para["box"]
+        if x1 <= mouse_x <= x2 and y1 <= mouse_y <= y2:
+            print(f"鼠标在段落内: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
+            return para
+    
+    print("鼠标不在任何段落内，寻找最近的段落...")
+    
+    min_distance = float('inf')
+    nearest_para = None
+    
+    for para in merged_paragraphs:
+        x1, y1, x2, y2 = para["box"]
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        
+        distance = ((mouse_x - center_x) ** 2 + (mouse_y - center_y) ** 2) ** 0.5
+        
+        if distance < min_distance:
+            min_distance = distance
+            nearest_para = para
+    
+    if nearest_para:
+        x1, y1, x2, y2 = nearest_para["box"]
+        print(f"最近的段落: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}, 距离={min_distance:.1f}")
+    
+    return nearest_para
+
+
 def on_f4_pressed():
     """
     F4键按下时的处理函数
     """
     print("\n=== F4 按下，开始处理 ===")
+    
+    # 获取鼠标位置
+    mouse_x, mouse_y = pyautogui.position()
     
     # 全屏截图
     screenshot = capture_full_screen()
@@ -330,6 +426,23 @@ def on_f4_pressed():
             # 在新图片上绘制合并后的段落
             merged_image_path = f"./output/merged_{timestamp}.png"
             draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
+            
+            # 对合并后的段落进行 OCR 识别
+            merged_paragraphs = recognize_merged_paragraphs(screenshot_path, merged_paragraphs)
+            
+            # 找到鼠标下或最近的文本段落
+            target_para = find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y)
+            
+            if target_para and 'text' in target_para and target_para['text']:
+                print("\n" + "=" * 80)
+                print(f"目标段落文本: {target_para['text']}")
+                print("=" * 80)
+                
+                # 写入剪切板
+                pyperclip.copy(target_para['text'])
+                print("\n文本已写入剪切板")
+            else:
+                print("\n未找到有效的文本内容")
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
             print("仅保存了原始检测结果")
