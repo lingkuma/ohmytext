@@ -485,32 +485,22 @@ def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
 
 
 def on_f4_pressed():
-    """
-    F4键按下时的处理函数
-    """
     print("\n=== F4 按下，开始处理 ===")
     
-    # 获取鼠标位置
     mouse_x, mouse_y = pyautogui.position()
-    
-    # 全屏截图
     screenshot = capture_full_screen()
     
-    # 生成带时间戳的文件名
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     screenshot_path = f"./output/screenshot_{timestamp}.png"
     
-    # 确保output目录存在
     if save_debug_images:
         os.makedirs("./output", exist_ok=True)
-        
-        # 保存截图
         screenshot.save(screenshot_path)
         print(f"截图已保存: {screenshot_path}")
     
-    # 文本检测
     print("正在进行文本检测...")
-    output = model.predict(screenshot_path, batch_size=1)
+    screenshot_np = np.array(screenshot)
+    output = model.predict(screenshot_np, batch_size=1)
     
     # 保存检测结果
     for i, res in enumerate(output):
@@ -555,8 +545,6 @@ def on_f4_pressed():
             target_para = find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y)
             
             if target_para:
-                # 只对目标段落进行裁切和 OCR 识别
-                image = Image.open(screenshot_path)
                 x1, y1, x2, y2 = target_para["box"]
                 
                 print("\n" + "=" * 80)
@@ -564,7 +552,7 @@ def on_f4_pressed():
                 print(f"裁切区域: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
                 print("=" * 80)
                 
-                cropped_image = image.crop((x1, y1, x2, y2))
+                cropped_image = screenshot.crop((x1, y1, x2, y2))
                 
                 try:
                     result = call_luna_ocr_api(cropped_image)
