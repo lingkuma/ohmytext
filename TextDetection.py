@@ -261,6 +261,83 @@ def draw_merged_paragraphs(image_path, merged_paragraphs, output_path):
     print(f"\n合并后的段落图片已保存到: {output_path}")
 
 
+def draw_ocr_text_on_merged_image(image_path, merged_paragraphs, output_path):
+    """
+    在合并后的段落图片上绘制OCR识别的文本（红色字体）
+    
+    参数:
+        image_path: 原始图片路径
+        merged_paragraphs: 合并后的段落列表（包含OCR识别的文本）
+        output_path: 输出图片路径
+    """
+    image = Image.open(image_path)
+    draw = ImageDraw.Draw(image)
+    
+    colors = [
+        (255, 0, 0),      # 红色
+        (0, 255, 0),      # 绿色
+        (0, 0, 255),      # 蓝色
+        (255, 255, 0),    # 黄色
+        (255, 0, 255),    # 洋红色
+        (0, 255, 255),    # 青色
+        (255, 128, 0),    # 橙色
+        (128, 0, 255),    # 紫色
+        (0, 128, 255),    # 天蓝色
+        (255, 0, 128),    # 粉红色
+    ]
+    
+    print("\n" + "=" * 80)
+    print("在合并后的段落图片上绘制OCR文本...")
+    print("=" * 80)
+    
+    for i, para in enumerate(merged_paragraphs):
+        x1, y1, x2, y2 = para["box"]
+        color = colors[i % len(colors)]
+        
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+        
+        if 'text' in para and para['text']:
+            text = para['text']
+            
+            try:
+                from PIL import ImageFont
+                
+                font_size = max(12, int((y2 - y1) * 0.8))
+                try:
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                except:
+                    font = ImageFont.load_default()
+                
+                text_bbox = draw.textbbox((x1, y1), text, font=font)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_height = text_bbox[3] - text_bbox[1]
+                
+                box_width = x2 - x1
+                box_height = y2 - y1
+                
+                if text_width > box_width:
+                    font_size = int(font_size * (box_width / text_width))
+                    try:
+                        font = ImageFont.truetype("arial.ttf", font_size)
+                    except:
+                        font = ImageFont.load_default()
+                
+                text_x = x1 + 5
+                text_y = y1 + (box_height - text_height) // 2
+                
+                draw.text((text_x, text_y), text, fill=(255, 0, 0), font=font)
+                
+                print(f"段落 {i+1}: 绘制文本 '{text}'")
+            except Exception as e:
+                print(f"段落 {i+1}: 绘制文本失败 - {e}")
+                draw.text((x1 + 5, y1 + 5), para['text'], fill=(255, 0, 0))
+        else:
+            print(f"段落 {i+1}: 无OCR文本")
+    
+    image.save(output_path)
+    print(f"\n带OCR文本的合并段落图片已保存到: {output_path}")
+
+
 def capture_full_screen():
     """
     全屏截图
@@ -302,35 +379,10 @@ def recognize_merged_paragraphs(image_path, merged_paragraphs):
             cropped_array = np.array(cropped_image)
             output = rec_model.predict(input=cropped_array, batch_size=1)
               
-            print(f"OCR 返回结果类型: {type(output)}")
-            print(f"OCR 返回结果长度: {len(output) if output else 0}")
-            
-            if output:
-                for res in output:
-                    print(f"结果对象类型: {type(res)}")
-                    
-                    if hasattr(res, 'print'):
-                        print("调用 res.print():")
-                        res.print()
-                    
-                    if hasattr(res, 'texts'):
-                        print(f"texts 属性: {res.texts}")
-                    
-                    if hasattr(res, 'rec_texts'):
-                        print(f"rec_texts 属性: {res.rec_texts}")
-            
             text_list = []
             for res in output:
-                try:
-                    if 'rec_text' in res:
-                        text_list.append(res['rec_text'])
-                        print(f"成功提取文本: {res['rec_text']}")
-                    else:
-                        print(f"无法从 res 中提取文本，res 内容: {res}")
-                except Exception as e:
-                    print(f"提取文本时出错: {e}")
-                    print(f"res 类型: {type(res)}")
-                    print(f"res 内容: {res}")
+                if 'rec_text' in res:
+                    text_list.append(res['rec_text'])
             
             para['text'] = ' '.join(text_list)
             
@@ -453,6 +505,10 @@ def on_f4_pressed():
             
             # 对合并后的段落进行 OCR 识别
             merged_paragraphs = recognize_merged_paragraphs(screenshot_path, merged_paragraphs)
+            
+            # 在合并后的段落图片上绘制OCR文本（红色字体）
+            ocr_text_image_path = f"./output/merged_with_text_{timestamp}.png"
+            draw_ocr_text_on_merged_image(screenshot_path, merged_paragraphs, ocr_text_image_path)
             
             # 找到鼠标下或最近的文本段落
             target_para = find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y)
