@@ -546,26 +546,45 @@ def on_f4_pressed():
             merged_image_path = f"./output/merged_{timestamp}.png"
             draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
             
-            # 对合并后的段落进行 OCR 识别
-            merged_paragraphs = recognize_merged_paragraphs(screenshot_path, merged_paragraphs)
-            
-            # 在合并后的段落图片上绘制OCR文本（红色字体）
-            ocr_text_image_path = f"./output/merged_with_text_{timestamp}.png"
-            draw_ocr_text_on_merged_image(screenshot_path, merged_paragraphs, ocr_text_image_path)
-            
             # 找到鼠标下或最近的文本段落
             target_para = find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y)
             
-            if target_para and 'text' in target_para and target_para['text']:
+            if target_para:
+                # 只对目标段落进行裁切和 OCR 识别
+                image = Image.open(screenshot_path)
+                x1, y1, x2, y2 = target_para["box"]
+                
                 print("\n" + "=" * 80)
-                print(f"目标段落文本: {target_para['text']}")
+                print(f"【目标段落】")
+                print(f"裁切区域: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
                 print("=" * 80)
                 
-                # 写入剪切板
-                pyperclip.copy(target_para['text'])
-                print("\n文本已写入剪切板")
+                cropped_image = image.crop((x1, y1, x2, y2))
+                
+                try:
+                    result = call_luna_ocr_api(cropped_image)
+                    
+                    if result and 'text' in result:
+                        text = result['text']
+                        print(f"识别结果: {text}")
+                        
+                        # 写入剪切板
+                        pyperclip.copy(text)
+                        print("\n文本已写入剪切板")
+                        
+                        # 在合并后的段落图片上绘制OCR文本（红色字体）
+                        target_para['text'] = text
+                        ocr_text_image_path = f"./output/merged_with_text_{timestamp}.png"
+                        draw_ocr_text_on_merged_image(screenshot_path, merged_paragraphs, ocr_text_image_path)
+                    else:
+                        print(f"识别失败: API返回结果为空或格式错误")
+                        
+                except Exception as e:
+                    print(f"识别失败: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
-                print("\n未找到有效的文本内容")
+                print("\n未找到目标段落")
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
             print("仅保存了原始检测结果")
