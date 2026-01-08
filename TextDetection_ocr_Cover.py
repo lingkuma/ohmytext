@@ -10,10 +10,13 @@ import requests
 import json
 import io
 from paddleocr import TextDetection
+import webbrowser
+import shutil
 
 model = TextDetection(model_name="PP-OCRv5_server_det")
 
 save_debug_images = False
+STATUS_BAR_HEIGHT = 48
 
 
 def image_to_base64(image_path_or_pil):
@@ -384,6 +387,121 @@ def draw_ocr_text_on_merged_image(image_path, merged_paragraphs, output_path):
     print(f"\n带OCR文本的合并段落图片已保存到: {output_path}")
 
 
+def generate_html_page(merged_paragraphs, output_path):
+    """
+    生成HTML页面，显示OCR识别的文本
+    
+    参数:
+        merged_paragraphs: 合并后的段落列表（包含OCR识别的文本）
+        output_path: 输出HTML文件路径
+    """
+    text_data = []
+    
+    for para in merged_paragraphs:
+        x1, y1, x2, y2 = para["box"]
+        
+        adjusted_y = y1 - STATUS_BAR_HEIGHT
+        
+        text = para.get('text', '')
+        
+        text_data.append({
+            'x': x1,
+            'y': adjusted_y,
+            'width': x2 - x1,
+            'height': y2 - y1,
+            'text': text
+        })
+    
+    html_template = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Text Display</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #ffffff;
+            position: relative;
+        }
+
+        .text-box {
+            position: absolute;
+            background-color: #ffffff;
+            font-size: 16px;
+            line-height: 1.5;
+            color: #000000;
+            overflow-y: auto;
+            overflow-x: hidden;
+            word-wrap: break-word;
+            word-break: break-all;
+            white-space: pre-wrap;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .text-box::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .text-box::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .text-box::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        .text-box::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="text-container"></div>
+
+    <script>
+        const textData = ''' + json.dumps(text_data, ensure_ascii=False) + ''';
+        
+        function renderTextBoxes() {
+            const container = document.getElementById('text-container');
+            container.innerHTML = '';
+            
+            textData.forEach((item, index) => {
+                const box = document.createElement('div');
+                box.className = 'text-box';
+                box.style.left = item.x + 'px';
+                box.style.top = item.y + 'px';
+                box.style.width = item.width + 'px';
+                box.style.height = item.height + 'px';
+                box.textContent = item.text;
+                box.id = `text-box-${index}`;
+                container.appendChild(box);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', renderTextBoxes);
+    </script>
+</body>
+</html>'''
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_template)
+    
+    print(f"\nHTML页面已生成: {output_path}")
+    print(f"共生成 {len(text_data)} 个文本区域")
+
+
 def capture_full_screen():
     """
     全屏截图
@@ -485,46 +603,37 @@ def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
 
 
 def on_f4_pressed():
-    print("\n=== F4 按下，开始处理 ===")
+    print("\n=== F4 按下，开始全屏OCR识别并生成网页 ===")
     
-    mouse_x, mouse_y = pyautogui.position()
     screenshot = capture_full_screen()
     
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     screenshot_path = f"./output/screenshot_{timestamp}.png"
     
-    if save_debug_images:
-        os.makedirs("./output", exist_ok=True)
-        screenshot.save(screenshot_path)
-        print(f"截图已保存: {screenshot_path}")
+    os.makedirs("./output", exist_ok=True)
+    screenshot.save(screenshot_path)
+    print(f"截图已保存: {screenshot_path}")
     
     print("正在进行文本检测...")
     screenshot_np = np.array(screenshot)
     output = model.predict(screenshot_np, batch_size=1)
     
-    # 保存检测结果
     for i, res in enumerate(output):
         res.print()
         
-        # 保存带文本区域的图片和JSON结果
         if save_debug_images:
             res.save_to_img(save_path="./output/")
-            
-            # 保存JSON结果
             json_path = f"./output/detection_{timestamp}.json"
             res.save_to_json(save_path=json_path)
             print(f"检测结果已保存到: {json_path}")
         
-        # 获取检测结果并应用分列合并算法
         if 'dt_polys' in res:
             dt_polys = res['dt_polys']
             
-            # 将多边形坐标转换为矩形框
             boxes = polys_to_boxes(dt_polys)
             
             print(f"\n检测到 {len(boxes)} 个文本块")
             
-            # 应用分列和合并算法（仅基于坐标）
             merged_paragraphs = sort_ocr_results(boxes, y_thresh=18)
             
             print("\n" + "=" * 80)
@@ -536,52 +645,22 @@ def on_f4_pressed():
                 print(f"坐标: x1={para['box'][0]:.1f}, y1={para['box'][1]:.1f}, x2={para['box'][2]:.1f}, y2={para['box'][3]:.1f}")
                 print(f"包含 {len(para['children'])} 个文本块")
             
-            # 在新图片上绘制合并后的段落
             if save_debug_images:
                 merged_image_path = f"./output/merged_{timestamp}.png"
                 draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
             
-            # 找到鼠标下或最近的文本段落
-            target_para = find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y)
+            merged_paragraphs = recognize_merged_paragraphs(screenshot_path, merged_paragraphs)
             
-            if target_para:
-                x1, y1, x2, y2 = target_para["box"]
-                
-                print("\n" + "=" * 80)
-                print(f"【目标段落】")
-                print(f"裁切区域: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
-                print("=" * 80)
-                
-                cropped_image = screenshot.crop((x1, y1, x2, y2))
-                
-                try:
-                    result = call_luna_ocr_api(cropped_image)
-                    
-                    if result and 'text' in result:
-                        text = result['text']
-                        print(f"识别结果: {text}")
-                        
-                        # 写入剪切板
-                        pyperclip.copy(text)
-                        print("\n文本已写入剪切板")
-                        
-                        # 在合并后的段落图片上绘制OCR文本（红色字体）
-                        if save_debug_images:
-                            target_para['text'] = text
-                            ocr_text_image_path = f"./output/merged_with_text_{timestamp}.png"
-                            draw_ocr_text_on_merged_image(screenshot_path, merged_paragraphs, ocr_text_image_path)
-                    else:
-                        print(f"识别失败: API返回结果为空或格式错误")
-                        
-                except Exception as e:
-                    print(f"识别失败: {e}")
-                    import traceback
-                    traceback.print_exc()
-            else:
-                print("\n未找到目标段落")
+            html_output_path = f"./output/ocr_display_{timestamp}.html"
+            generate_html_page(merged_paragraphs, html_output_path)
+            
+            print("\n" + "=" * 80)
+            print("全屏OCR识别完成！")
+            print(f"HTML页面已生成: {html_output_path}")
+            print("您可以使用透明化工具在浏览器中打开此页面查看OCR结果")
+            print("=" * 80)
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
-            print("仅保存了原始检测结果")
 
 
 def main():
