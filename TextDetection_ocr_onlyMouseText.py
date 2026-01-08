@@ -13,6 +13,8 @@ from paddleocr import TextDetection
 
 model = TextDetection(model_name="PP-OCRv5_server_det")
 
+save_debug_images = False
+
 
 def image_to_base64(image_path_or_pil):
     if isinstance(image_path_or_pil, str):
@@ -499,11 +501,12 @@ def on_f4_pressed():
     screenshot_path = f"./output/screenshot_{timestamp}.png"
     
     # 确保output目录存在
-    os.makedirs("./output", exist_ok=True)
-    
-    # 保存截图
-    screenshot.save(screenshot_path)
-    print(f"截图已保存: {screenshot_path}")
+    if save_debug_images:
+        os.makedirs("./output", exist_ok=True)
+        
+        # 保存截图
+        screenshot.save(screenshot_path)
+        print(f"截图已保存: {screenshot_path}")
     
     # 文本检测
     print("正在进行文本检测...")
@@ -513,13 +516,14 @@ def on_f4_pressed():
     for i, res in enumerate(output):
         res.print()
         
-        # 保存带文本区域的图片
-        res.save_to_img(save_path="./output/")
-        
-        # 保存JSON结果
-        json_path = f"./output/detection_{timestamp}.json"
-        res.save_to_json(save_path=json_path)
-        print(f"检测结果已保存到: {json_path}")
+        # 保存带文本区域的图片和JSON结果
+        if save_debug_images:
+            res.save_to_img(save_path="./output/")
+            
+            # 保存JSON结果
+            json_path = f"./output/detection_{timestamp}.json"
+            res.save_to_json(save_path=json_path)
+            print(f"检测结果已保存到: {json_path}")
         
         # 获取检测结果并应用分列合并算法
         if 'dt_polys' in res:
@@ -543,8 +547,9 @@ def on_f4_pressed():
                 print(f"包含 {len(para['children'])} 个文本块")
             
             # 在新图片上绘制合并后的段落
-            merged_image_path = f"./output/merged_{timestamp}.png"
-            draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
+            if save_debug_images:
+                merged_image_path = f"./output/merged_{timestamp}.png"
+                draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
             
             # 找到鼠标下或最近的文本段落
             target_para = find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y)
@@ -573,9 +578,10 @@ def on_f4_pressed():
                         print("\n文本已写入剪切板")
                         
                         # 在合并后的段落图片上绘制OCR文本（红色字体）
-                        target_para['text'] = text
-                        ocr_text_image_path = f"./output/merged_with_text_{timestamp}.png"
-                        draw_ocr_text_on_merged_image(screenshot_path, merged_paragraphs, ocr_text_image_path)
+                        if save_debug_images:
+                            target_para['text'] = text
+                            ocr_text_image_path = f"./output/merged_with_text_{timestamp}.png"
+                            draw_ocr_text_on_merged_image(screenshot_path, merged_paragraphs, ocr_text_image_path)
                     else:
                         print(f"识别失败: API返回结果为空或格式错误")
                         
