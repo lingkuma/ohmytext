@@ -5,10 +5,54 @@ import time
 import os
 import numpy as np
 import pyperclip
-from paddleocr import TextDetection, TextRecognition
+import base64
+import requests
+import json
+import io
+from paddleocr import TextDetection
 
 model = TextDetection(model_name="PP-OCRv5_server_det")
-rec_model = TextRecognition(model_name="latin_PP-OCRv5_mobile_rec")
+
+
+def image_to_base64(image_path_or_pil):
+    if isinstance(image_path_or_pil, str):
+        with open(image_path_or_pil, 'rb') as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    else:
+        img_byte_arr = io.BytesIO()
+        image_path_or_pil.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+        return base64.b64encode(img_byte_arr).decode('utf-8')
+
+
+def call_luna_ocr_api(image_path_or_pil):
+    api_url = 'http://127.0.0.1:2333/api/ocr'
+    
+    try:
+        base64_image = image_to_base64(image_path_or_pil)
+        
+        payload = {
+            'image': base64_image
+        }
+        
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.post(api_url, data=json.dumps(payload), headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f'API Error: Status Code {response.status_code}')
+            return None
+        
+    except requests.exceptions.RequestException as e:
+        print(f'Request Error: {e}')
+        return None
+    except Exception as e:
+        print(f'Error: {e}')
+        return None
 
 
 def detect_columns(items, x_thresh=10):
@@ -376,17 +420,16 @@ def recognize_merged_paragraphs(image_path, merged_paragraphs):
         print(f"裁切尺寸: {cropped_image.size[0]}x{cropped_image.size[1]}")
         
         try:
-            cropped_array = np.array(cropped_image)
-            output = rec_model.predict(input=cropped_array, batch_size=1)
-              
-            text_list = []
-            for res in output:
-                if 'rec_text' in res:
-                    text_list.append(res['rec_text'])
+            result = call_luna_ocr_api(cropped_image)
             
-            para['text'] = ' '.join(text_list)
-            
-            print(f"识别结果: {para['text']}")
+            if result and 'text' in result:
+                text = result['text']
+                para['text'] = text
+                print(f"识别结果: {text}")
+            else:
+                print(f"识别失败: API返回结果为空或格式错误")
+                para['text'] = ""
+                
         except Exception as e:
             print(f"识别失败: {e}")
             import traceback
