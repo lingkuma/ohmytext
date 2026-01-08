@@ -294,27 +294,51 @@ def recognize_merged_paragraphs(image_path, merged_paragraphs):
         
         cropped_image = image.crop((x1, y1, x2, y2))
         
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        cropped_path = f"./output/paragraph_{timestamp}_{i+1}.png"
-        cropped_image.save(cropped_path)
-        
         print(f"\n【段落 {i+1}】")
         print(f"裁切区域: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
-        print(f"裁切图片已保存: {cropped_path}")
+        print(f"裁切尺寸: {cropped_image.size[0]}x{cropped_image.size[1]}")
         
         try:
-            output = rec_model.predict(input=cropped_path, batch_size=1)
+            cropped_array = np.array(cropped_image)
+            output = rec_model.predict(input=cropped_array, batch_size=1)
+              
+            print(f"OCR 返回结果类型: {type(output)}")
+            print(f"OCR 返回结果长度: {len(output) if output else 0}")
+            
+            if output:
+                for res in output:
+                    print(f"结果对象类型: {type(res)}")
+                    
+                    if hasattr(res, 'print'):
+                        print("调用 res.print():")
+                        res.print()
+                    
+                    if hasattr(res, 'texts'):
+                        print(f"texts 属性: {res.texts}")
+                    
+                    if hasattr(res, 'rec_texts'):
+                        print(f"rec_texts 属性: {res.rec_texts}")
             
             text_list = []
             for res in output:
-                if 'texts' in res:
-                    text_list.extend(res['texts'])
+                try:
+                    if 'rec_text' in res:
+                        text_list.append(res['rec_text'])
+                        print(f"成功提取文本: {res['rec_text']}")
+                    else:
+                        print(f"无法从 res 中提取文本，res 内容: {res}")
+                except Exception as e:
+                    print(f"提取文本时出错: {e}")
+                    print(f"res 类型: {type(res)}")
+                    print(f"res 内容: {res}")
             
             para['text'] = ' '.join(text_list)
             
             print(f"识别结果: {para['text']}")
         except Exception as e:
             print(f"识别失败: {e}")
+            import traceback
+            traceback.print_exc()
             para['text'] = ""
     
     return merged_paragraphs
