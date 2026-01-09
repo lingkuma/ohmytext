@@ -32,6 +32,14 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
 AI_TIMEOUT = 14
 
+AI_CORRECTION_PROMPT = """下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
+1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
+2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
+3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
+4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
+5. 记得只返回清理后的句子，不许说其他废话
+原始文本：{text}"""
+
 AI_PROVIDER = os.getenv('AI_PROVIDER', 'gemini')
 OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -129,63 +137,14 @@ def init_openai():
         return None
 
 
-def correct_text_with_ai(text, ai_model):
-    """
-    使用AI校验和修正OCR识别的文本
-    
-    参数:
-        text: OCR识别的原始文本
-        ai_model: Gemini AI模型实例
-    
-    返回:
-        校正后的文本，如果校验失败则返回原始文本
-    """
-    if not ENABLE_AI_CORRECTION or not ai_model:
-        return text
-    
-    if len(text.strip()) < AI_MIN_TEXT_LENGTH:
-        return text
-    
-    if not text.strip():
-        return text
-    
-    try:
-        prompt = f"""
-下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
-1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
-2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
-3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
-4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
-5. 记得只返回清理后的句子，不许说其他废话
-原始文本：{text}"""
-
-        response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
-        
-        if response and response.text:
-            corrected_text = response.text.strip()
-            
-            if corrected_text and corrected_text != text:
-                print(f"AI校验: '{text}' -> '{corrected_text}'")
-                return corrected_text
-            else:
-                print(f"AI校验: 文本无需修正 '{text}'")
-                return text
-        else:
-            print(f"AI校验: 未返回有效结果")
-            return text
-            
-    except Exception as e:
-        print(f"AI校验失败: {e}")
-        return text
-
-
-def correct_text_with_openai(text, openai_client):
+def correct_text_with_openai(text, openai_client, prompt=None):
     """
     使用OpenAI校验和修正OCR识别的文本
     
     参数:
         text: OCR识别的原始文本
         openai_client: OpenAI客户端实例
+        prompt: 自定义prompt，如果为None则使用默认的AI_CORRECTION_PROMPT
     
     返回:
         校正后的文本，如果校验失败则返回原始文本
@@ -200,14 +159,11 @@ def correct_text_with_openai(text, openai_client):
         return text
     
     try:
-        prompt = f"""下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
-1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
-2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
-3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
-4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
-5. 记得只返回清理后的句子，不许说其他废话
-原始文本：{text}"""
-
+        if prompt is None:
+            prompt = AI_CORRECTION_PROMPT.format(text=text)
+        elif '{text}' in prompt:
+            prompt = prompt.format(text=text)
+        
         response = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
@@ -832,13 +788,7 @@ def correct_text_with_ai_async(para, ai_model, callback, force_correction=False)
             if AI_PROVIDER.lower() == 'openai' and openai_client:
                 corrected_text = correct_text_with_openai(text, openai_client)
             else:
-                prompt = f"""下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
-        1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
-        2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
-        3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
-        4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
-        5. 记得只返回清理后的句子，不许说其他废话
-        原始文本：{text}"""
+                prompt = AI_CORRECTION_PROMPT.format(text=text)
                 response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
                 
                 if response and response.text:
