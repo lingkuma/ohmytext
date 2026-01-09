@@ -832,14 +832,13 @@ def correct_text_with_ai_async(para, ai_model, callback, force_correction=False)
             if AI_PROVIDER.lower() == 'openai' and openai_client:
                 corrected_text = correct_text_with_openai(text, openai_client)
             else:
-                prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
-1. 字符混淆（如0和O、1和l、5和S等）
-2. 拼写错误
-3. 标点符号错误
-
-请只返回修正后的文本，不要添加任何解释或额外内容。
-
-原始文本：{text}"""
+                prompt = f"""下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
+        1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
+        2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
+        3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
+        4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
+        5. 记得只返回清理后的句子，不许说其他废话
+        原始文本：{text}"""
                 response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
                 
                 if response and response.text:
