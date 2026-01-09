@@ -24,6 +24,9 @@ STATUS_BAR_HEIGHT = 71
 
 ENABLE_AI_CORRECTION = False
 AI_MIN_TEXT_LENGTH = 10
+
+SMART_AI_SELECTION_MODE = True
+SMART_AI_SELECTION_COUNT = 2
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
 AI_TIMEOUT = 5
@@ -84,7 +87,7 @@ def init_gemini():
     返回:
         Gemini模型实例或None（如果初始化失败）
     """
-    if not ENABLE_AI_CORRECTION:
+    if not ENABLE_AI_CORRECTION and not SMART_AI_SELECTION_MODE:
         return None
     
     try:
@@ -118,13 +121,11 @@ def correct_text_with_ai(text, ai_model):
         return text
     
     try:
-        prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
-1. 字符混淆（如0和O、1和l、5和S等）
-2. 拼写错误
-3. 标点符号错误
-
-请只返回修正后的文本，不要添加任何解释或额外内容。
-
+        prompt = f"""
+下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
+1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
+2. 可能含有不属于句子内的干扰单词、符号等，请你删除之后返回完整的德语句子。 
+3. 记得只返回清理后的句子，不许说其他废话
 原始文本：{text}"""
 
         response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
@@ -657,7 +658,7 @@ def recognize_merged_paragraphs_concurrent(image_path_or_pil, merged_paragraphs)
     return merged_paragraphs
 
 
-def correct_text_with_ai_async(para, ai_model, callback):
+def correct_text_with_ai_async(para, ai_model, callback, force_correction=False):
     """
     异步使用AI校验和修正OCR识别的文本
     
@@ -665,6 +666,7 @@ def correct_text_with_ai_async(para, ai_model, callback):
         para: 包含OCR文本的段落字典
         ai_model: Gemini AI模型实例
         callback: 完成后的回调函数，接收修正后的段落
+        force_correction: 是否强制进行AI纠正（用于智能AI选择模式）
     """
     global ai_correction_count, ai_correction_completed
     
@@ -678,7 +680,7 @@ def correct_text_with_ai_async(para, ai_model, callback):
         x1, y1, x2, y2 = para["box"]
         para_info = f"段落[({int(x1)},{int(y1)})]"
         
-        if not ENABLE_AI_CORRECTION or not ai_model:
+        if not force_correction and (not ENABLE_AI_CORRECTION or not ai_model):
             print(f"{para_info} AI校验已禁用，跳过: '{text}'")
             with ai_correction_lock:
                 ai_correction_completed += 1
@@ -824,6 +826,51 @@ def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
     return nearest_para
 
 
+def find_nearest_paragraphs(merged_paragraphs, mouse_x, mouse_y, count):
+    """
+    找到鼠标最近的N个文本段落（基于中心点距离）
+    
+    参数:
+        merged_paragraphs: 合并后的段落列表
+        mouse_x: 鼠标 x 坐标
+        mouse_y: 鼠标 y 坐标
+        count: 要选择的段落数量
+    
+    返回:
+        最近的N个段落列表，按距离排序
+    """
+    print(f"\n鼠标位置: ({mouse_x}, {mouse_y})")
+    print(f"智能选择模式: 选择最近的 {count} 个段落")
+    
+    para_distances = []
+    
+    for para in merged_paragraphs:
+        x1, y1, x2, y2 = para["box"]
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        
+        distance = ((mouse_x - center_x) ** 2 + (mouse_y - center_y) ** 2) ** 0.5
+        
+        para_distances.append({
+            'para': para,
+            'distance': distance,
+            'center_x': center_x,
+            'center_y': center_y
+        })
+    
+    para_distances.sort(key=lambda x: x['distance'])
+    
+    selected_paras = [item['para'] for item in para_distances[:count]]
+    
+    print(f"\n已选择 {len(selected_paras)} 个段落:")
+    for i, item in enumerate(para_distances[:count]):
+        para = item['para']
+        x1, y1, x2, y2 = para["box"]
+        print(f"  {i+1}. 段落[({int(x1)},{int(y1)})] 距离={item['distance']:.1f}px")
+    
+    return selected_paras
+
+
 def on_f4_pressed():
     global ai_correction_count, ai_correction_completed
     
@@ -879,13 +926,28 @@ def on_f4_pressed():
 
             send_ocr_to_server(merged_paragraphs)
 
-            print("\n" + "=" * 80)
-            print("OCR识别完成！数据已发送到服务器")
-            print("开始AI纠错（后台异步处理）...")
-            print("=" * 80)
+            selected_paras = None
+            
+            if SMART_AI_SELECTION_MODE and not ENABLE_AI_CORRECTION:
+                mouse_x, mouse_y = pyautogui.position()
+                selected_paras = find_nearest_paragraphs(merged_paragraphs, mouse_x, mouse_y, SMART_AI_SELECTION_COUNT)
+                
+                print("\n" + "=" * 80)
+                print("智能AI选择模式已启用")
+                print("OCR识别完成！数据已发送到服务器")
+                print("开始AI纠错（仅对选中的段落进行后台异步处理）...")
+                print("=" * 80)
+                
+                for para in selected_paras:
+                    correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server, force_correction=True)
+            else:
+                print("\n" + "=" * 80)
+                print("OCR识别完成！数据已发送到服务器")
+                print("开始AI纠错（后台异步处理）...")
+                print("=" * 80)
 
-            for para in merged_paragraphs:
-                correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server)
+                for para in merged_paragraphs:
+                    correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server)
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
 
