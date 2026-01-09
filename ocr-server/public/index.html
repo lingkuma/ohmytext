@@ -36,6 +36,11 @@
             max-width: 100%;
         }
 
+        .text-box.auto-size {
+            width: auto !important;
+            height: auto !important;
+        }
+
         .text-box.corrected {
             color: #008000;
         }
@@ -109,8 +114,13 @@
                 box.className = 'text-box';
                 box.style.left = item.x + 'px';
                 box.style.top = item.y + 'px';
-                box.style.width = item.width + 'px';
-                box.style.height = item.height + 'px';
+                
+                if (item.is_merged) {
+                    box.style.width = item.width + 'px';
+                    box.style.height = item.height + 'px';
+                } else {
+                    box.classList.add('auto-size');
+                }
 
                 const paragraph = document.createElement('p');
                 paragraph.textContent = item.text;
@@ -141,8 +151,13 @@
                 newBox.className = 'text-box corrected';
                 newBox.style.left = correctionData.x + 'px';
                 newBox.style.top = correctionData.y + 'px';
-                newBox.style.width = correctionData.width + 'px';
-                newBox.style.height = correctionData.height + 'px';
+                
+                if (correctionData.is_merged) {
+                    newBox.style.width = correctionData.width + 'px';
+                    newBox.style.height = correctionData.height + 'px';
+                } else {
+                    newBox.classList.add('auto-size');
+                }
 
                 const paragraph = document.createElement('p');
                 paragraph.textContent = correctionData.text;

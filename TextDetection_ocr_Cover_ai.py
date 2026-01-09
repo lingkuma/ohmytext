@@ -22,7 +22,7 @@ model = TextDetection(model_name="PP-OCRv5_server_det")
 save_debug_images = False
 STATUS_BAR_HEIGHT = 71
 
-ENABLE_AI_CORRECTION = True
+ENABLE_AI_CORRECTION = False
 AI_MIN_TEXT_LENGTH = 10
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
@@ -492,13 +492,19 @@ def send_ocr_to_server(merged_paragraphs):
         adjusted_y = y1 - STATUS_BAR_HEIGHT
 
         text = para.get('text', '')
+        
+        children = para.get('children', [])
+        is_merged = len(children) > 1
+        merged_lines = len(children)
 
         text_data.append({
             'x': x1,
             'y': adjusted_y,
             'width': x2 - x1,
             'height': y2 - y1,
-            'text': text
+            'text': text,
+            'is_merged': is_merged,
+            'merged_lines': merged_lines
         })
 
     api_url = 'http://127.0.0.1:8080/api/update-ocr'
@@ -535,6 +541,10 @@ def send_ai_correction_to_server(para):
     
     x1, y1, x2, y2 = para["box"]
     para_info = f"段落[({int(x1)},{int(y1)})]"
+    
+    children = para.get('children', [])
+    is_merged = len(children) > 1
+    merged_lines = len(children)
 
     text_data = {
         'x': x1,
@@ -542,7 +552,9 @@ def send_ai_correction_to_server(para):
         'width': x2 - x1,
         'height': y2 - y1,
         'text': text,
-        'is_corrected': True
+        'is_corrected': True,
+        'is_merged': is_merged,
+        'merged_lines': merged_lines
     }
 
     api_url = 'http://127.0.0.1:8080/api/update-ocr-correction'
