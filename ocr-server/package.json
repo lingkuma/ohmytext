@@ -1,0 +1,18 @@
+{
+  "name": "ocr-overlay-server",
+  "version": "1.0.0",
+  "description": "OCR Overlay Server for Game Text",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["ocr", "overlay", "game"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.13.0",
+    "cors": "^2.8.5"
+  }
+}

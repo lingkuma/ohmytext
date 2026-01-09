@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Text Display</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #ffffff;
+            position: relative;
+        }
+
+        .text-box {
+            position: absolute;
+            background-color: #ffffff;
+            font-size: 16px;
+            line-height: 1.5;
+            color: #000000;
+            overflow-y: auto;
+            overflow-x: hidden;
+            word-wrap: break-word;
+            word-break: break-all;
+            white-space: pre-wrap;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 100%;
+        }
+
+        .text-box::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .text-box::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .text-box::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+
+        .text-box::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .text-box p {
+            margin: 0;
+            padding: 0;
+        }
+
+        .status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+
+        .status.connected {
+            background: rgba(0, 128, 0, 0.7);
+        }
+
+        .status.disconnected {
+            background: rgba(255, 0, 0, 0.7);
+        }
+    </style>
+</head>
+<body>
+    <div id="text-container"></div>
+    <div id="status" class="status disconnected">未连接</div>
+
+    <script>
+        const container = document.getElementById('text-container');
+        const status = document.getElementById('status');
+
+        function renderTextBoxes(data) {
+            container.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                return;
+            }
+
+            data.forEach((item, index) => {
+                const box = document.createElement('div');
+                box.className = 'text-box';
+                box.style.left = item.x + 'px';
+                box.style.top = item.y + 'px';
+                box.style.width = item.width + 'px';
+                box.style.height = item.height + 'px';
+
+                const paragraph = document.createElement('p');
+                paragraph.textContent = item.text;
+                box.appendChild(paragraph);
+
+                box.id = `text-box-${index}`;
+                container.appendChild(box);
+            });
+        }
+
+        function connectWebSocket() {
+            const ws = new WebSocket('ws://localhost:3000');
+
+            ws.onopen = () => {
+                console.log('WebSocket已连接');
+                status.textContent = '已连接';
+                status.className = 'status connected';
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === 'update') {
+                    console.log('收到OCR数据更新，文本区域数量:', message.data.length);
+                    renderTextBoxes(message.data);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket连接已断开，5秒后重连...');
+                status.textContent = '连接断开，重连中...';
+                status.className = 'status disconnected';
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket错误:', error);
+            };
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

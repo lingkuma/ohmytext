@@ -10,13 +10,11 @@ import requests
 import json
 import io
 from paddleocr import TextDetection
-import webbrowser
-import shutil
 
 model = TextDetection(model_name="PP-OCRv5_server_det")
 
 save_debug_images = False
-STATUS_BAR_HEIGHT = 48
+STATUS_BAR_HEIGHT = 71
 
 
 def image_to_base64(image_path_or_pil):
@@ -387,23 +385,22 @@ def draw_ocr_text_on_merged_image(image_path, merged_paragraphs, output_path):
     print(f"\n带OCR文本的合并段落图片已保存到: {output_path}")
 
 
-def generate_html_page(merged_paragraphs, output_path):
+def send_ocr_to_server(merged_paragraphs):
     """
-    生成HTML页面，显示OCR识别的文本
-    
+    将OCR数据发送到Node.js服务器
+
     参数:
         merged_paragraphs: 合并后的段落列表（包含OCR识别的文本）
-        output_path: 输出HTML文件路径
     """
     text_data = []
-    
+
     for para in merged_paragraphs:
         x1, y1, x2, y2 = para["box"]
-        
+
         adjusted_y = y1 - STATUS_BAR_HEIGHT
-        
+
         text = para.get('text', '')
-        
+
         text_data.append({
             'x': x1,
             'y': adjusted_y,
@@ -411,95 +408,23 @@ def generate_html_page(merged_paragraphs, output_path):
             'height': y2 - y1,
             'text': text
         })
-    
-    html_template = '''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OCR Text Display</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
 
-        body {
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background-color: #ffffff;
-            position: relative;
-        }
+    api_url = 'http://127.0.0.1:3000/api/update-ocr'
 
-        .text-box {
-            position: absolute;
-            background-color: #ffffff;
-            font-size: 16px;
-            line-height: 1.5;
-            color: #000000;
-            overflow-y: auto;
-            overflow-x: hidden;
-            word-wrap: break-word;
-            word-break: break-all;
-            white-space: pre-wrap;
-            padding: 8px;
-            border: 1px solid #e0e0e0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
+    try:
+        response = requests.post(api_url, json=text_data, headers={'Content-Type': 'application/json'})
 
-        .text-box::-webkit-scrollbar {
-            width: 8px;
-        }
+        if response.status_code == 200:
+            result = response.json()
+            print(f"OCR数据已成功发送到服务器，共 {len(text_data)} 个文本区域")
+            return True
+        else:
+            print(f"发送OCR数据失败: HTTP {response.status_code}")
+            return False
 
-        .text-box::-webkit-scrollbar-track {
-            background: #f1f1f1;
-        }
-
-        .text-box::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 4px;
-        }
-
-        .text-box::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-    </style>
-</head>
-<body>
-    <div id="text-container"></div>
-
-    <script>
-        const textData = ''' + json.dumps(text_data, ensure_ascii=False) + ''';
-        
-        function renderTextBoxes() {
-            const container = document.getElementById('text-container');
-            container.innerHTML = '';
-            
-            textData.forEach((item, index) => {
-                const box = document.createElement('div');
-                box.className = 'text-box';
-                box.style.left = item.x + 'px';
-                box.style.top = item.y + 'px';
-                box.style.width = item.width + 'px';
-                box.style.height = item.height + 'px';
-                box.textContent = item.text;
-                box.id = `text-box-${index}`;
-                container.appendChild(box);
-            });
-        }
-
-        document.addEventListener('DOMContentLoaded', renderTextBoxes);
-    </script>
-</body>
-</html>'''
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html_template)
-    
-    print(f"\nHTML页面已生成: {output_path}")
-    print(f"共生成 {len(text_data)} 个文本区域")
+    except requests.exceptions.RequestException as e:
+        print(f"发送OCR数据时出错: {e}")
+        return False
 
 
 def capture_full_screen():
@@ -513,18 +438,21 @@ def capture_full_screen():
     return screenshot
 
 
-def recognize_merged_paragraphs(image_path, merged_paragraphs):
+def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs):
     """
     对合并后的段落进行 OCR 识别
     
     参数:
-        image_path: 原始图片路径
+        image_path_or_pil: 原始图片路径或 PIL Image 对象
         merged_paragraphs: 合并后的段落列表
     
     返回:
         识别后的段落列表，每个段落添加了 'text' 字段
     """
-    image = Image.open(image_path)
+    if isinstance(image_path_or_pil, str):
+        image = Image.open(image_path_or_pil)
+    else:
+        image = image_path_or_pil
     
     print("\n" + "=" * 80)
     print("开始对合并后的段落进行 OCR 识别...")
@@ -603,61 +531,59 @@ def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
 
 
 def on_f4_pressed():
-    print("\n=== F4 按下，开始全屏OCR识别并生成网页 ===")
-    
+    print("\n=== F4 按下，开始全屏OCR识别 ===")
+
     screenshot = capture_full_screen()
-    
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    screenshot_path = f"./output/screenshot_{timestamp}.png"
-    
-    os.makedirs("./output", exist_ok=True)
-    screenshot.save(screenshot_path)
-    print(f"截图已保存: {screenshot_path}")
-    
+
     print("正在进行文本检测...")
     screenshot_np = np.array(screenshot)
     output = model.predict(screenshot_np, batch_size=1)
-    
+
     for i, res in enumerate(output):
         res.print()
-        
+
         if save_debug_images:
+            os.makedirs("./output", exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             res.save_to_img(save_path="./output/")
             json_path = f"./output/detection_{timestamp}.json"
             res.save_to_json(save_path=json_path)
             print(f"检测结果已保存到: {json_path}")
-        
+
         if 'dt_polys' in res:
             dt_polys = res['dt_polys']
-            
+
             boxes = polys_to_boxes(dt_polys)
-            
+
             print(f"\n检测到 {len(boxes)} 个文本块")
-            
+
             merged_paragraphs = sort_ocr_results(boxes, y_thresh=18)
-            
+
             print("\n" + "=" * 80)
             print(f"合并完成！共得到 {len(merged_paragraphs)} 个段落:")
             print("=" * 80)
-            
+
             for i, para in enumerate(merged_paragraphs):
                 print(f"\n【段落 {i+1}】")
                 print(f"坐标: x1={para['box'][0]:.1f}, y1={para['box'][1]:.1f}, x2={para['box'][2]:.1f}, y2={para['box'][3]:.1f}")
                 print(f"包含 {len(para['children'])} 个文本块")
-            
+
             if save_debug_images:
+                os.makedirs("./output", exist_ok=True)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                screenshot_path = f"./output/screenshot_{timestamp}.png"
+                screenshot.save(screenshot_path)
                 merged_image_path = f"./output/merged_{timestamp}.png"
                 draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
-            
-            merged_paragraphs = recognize_merged_paragraphs(screenshot_path, merged_paragraphs)
-            
-            html_output_path = f"./output/ocr_display_{timestamp}.html"
-            generate_html_page(merged_paragraphs, html_output_path)
-            
+
+            merged_paragraphs = recognize_merged_paragraphs(screenshot, merged_paragraphs)
+
+            send_ocr_to_server(merged_paragraphs)
+
             print("\n" + "=" * 80)
             print("全屏OCR识别完成！")
-            print(f"HTML页面已生成: {html_output_path}")
-            print("您可以使用透明化工具在浏览器中打开此页面查看OCR结果")
+            print("OCR数据已发送到服务器，浏览器页面会自动更新")
+            print("按F4键可以重新识别并更新页面")
             print("=" * 80)
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
