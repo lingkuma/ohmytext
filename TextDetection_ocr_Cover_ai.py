@@ -89,7 +89,7 @@ def init_gemini():
     
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         print("Gemini AI模型初始化成功")
         return model
     except Exception as e:
@@ -668,14 +668,41 @@ def correct_text_with_ai_async(para, ai_model, callback):
         
         if not ENABLE_AI_CORRECTION or not ai_model:
             print(f"{para_info} AI校验已禁用，跳过: '{text}'")
+            with ai_correction_lock:
+                ai_correction_completed += 1
+                if ai_correction_completed >= ai_correction_count:
+                    print("\n" + "=" * 80)
+                    print("全屏OCR识别完成！")
+                    print("OCR数据已发送到服务器，浏览器页面会自动更新")
+                    print("AI纠错已全部完成，已修正的文本会显示为绿色")
+                    print("按F4键可以重新识别并更新页面")
+                    print("=" * 80 + "\n")
             return
         
         if not text_stripped:
             print(f"{para_info} 文本为空，跳过AI校验")
+            with ai_correction_lock:
+                ai_correction_completed += 1
+                if ai_correction_completed >= ai_correction_count:
+                    print("\n" + "=" * 80)
+                    print("全屏OCR识别完成！")
+                    print("OCR数据已发送到服务器，浏览器页面会自动更新")
+                    print("AI纠错已全部完成，已修正的文本会显示为绿色")
+                    print("按F4键可以重新识别并更新页面")
+                    print("=" * 80 + "\n")
             return
         
         if text_length < AI_MIN_TEXT_LENGTH:
             print(f"{para_info} 文本长度({text_length}) < 最小长度({AI_MIN_TEXT_LENGTH})，跳过AI校验: '{text}'")
+            with ai_correction_lock:
+                ai_correction_completed += 1
+                if ai_correction_completed >= ai_correction_count:
+                    print("\n" + "=" * 80)
+                    print("全屏OCR识别完成！")
+                    print("OCR数据已发送到服务器，浏览器页面会自动更新")
+                    print("AI纠错已全部完成，已修正的文本会显示为绿色")
+                    print("按F4键可以重新识别并更新页面")
+                    print("=" * 80 + "\n")
             return
         
         print(f"{para_info} 文本长度({text_length}) >= 最小长度({AI_MIN_TEXT_LENGTH})，开始AI校验: '{text}'")
@@ -698,18 +725,16 @@ def correct_text_with_ai_async(para, ai_model, callback):
                 if corrected_text and corrected_text != text:
                     print(f"{para_info} AI校验成功: '{text}' -> '{corrected_text}'")
                     para['corrected_text'] = corrected_text
+                    callback(para)
                 else:
                     print(f"{para_info} AI校验: 文本无需修正 '{text}'")
                     para['corrected_text'] = text
+                    callback(para)
             else:
-                print(f"{para_info} AI校验: 未返回有效结果")
-                para['corrected_text'] = text
+                print(f"{para_info} AI校验: 未返回有效结果，不发送到服务器")
                 
         except Exception as e:
-            print(f"{para_info} AI校验失败: {e}")
-            para['corrected_text'] = text
-        
-        callback(para)
+            print(f"{para_info} AI校验失败: {e}，不发送到服务器")
         
         with ai_correction_lock:
             ai_correction_completed += 1
