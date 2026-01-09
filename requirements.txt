@@ -1,0 +1,9 @@
+keyboard
+pyautogui
+pillow
+numpy
+pyperclip
+requests
+paddleocr
+google-generativeai
+python-dotenv

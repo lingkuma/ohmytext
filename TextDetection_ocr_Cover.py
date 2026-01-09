@@ -10,11 +10,19 @@ import requests
 import json
 import io
 from paddleocr import TextDetection
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 model = TextDetection(model_name="PP-OCRv5_server_det")
 
 save_debug_images = False
 STATUS_BAR_HEIGHT = 71
+
+ENABLE_AI_CORRECTION = True
+AI_MIN_TEXT_LENGTH = 10
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 
 def image_to_base64(image_path_or_pil):
@@ -56,6 +64,79 @@ def call_luna_ocr_api(image_path_or_pil):
     except Exception as e:
         print(f'Error: {e}')
         return None
+
+
+def init_gemini():
+    """
+    初始化Gemini AI模型
+    
+    返回:
+        Gemini模型实例或None（如果初始化失败）
+    """
+    if not ENABLE_AI_CORRECTION:
+        return None
+    
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+        print("Gemini AI模型初始化成功")
+        return model
+    except Exception as e:
+        print(f"Gemini AI初始化失败: {e}")
+        return None
+
+
+def correct_text_with_ai(text, ai_model):
+    """
+    使用AI校验和修正OCR识别的文本
+    
+    参数:
+        text: OCR识别的原始文本
+        ai_model: Gemini AI模型实例
+    
+    返回:
+        校正后的文本，如果校验失败则返回原始文本
+    """
+    if not ENABLE_AI_CORRECTION or not ai_model:
+        return text
+    
+    if len(text.strip()) < AI_MIN_TEXT_LENGTH:
+        return text
+    
+    if not text.strip():
+        return text
+    
+    try:
+        prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
+1. 字符混淆（如0和O、1和l、5和S等）
+2. 拼写错误
+3. 标点符号错误
+
+请只返回修正后的文本，不要添加任何解释或额外内容。
+
+原始文本：{text}"""
+
+        response = ai_model.generate_content(prompt)
+        
+        if response and response.text:
+            corrected_text = response.text.strip()
+            
+            if corrected_text and corrected_text != text:
+                print(f"AI校验: '{text}' -> '{corrected_text}'")
+                return corrected_text
+            else:
+                print(f"AI校验: 文本无需修正 '{text}'")
+                return text
+        else:
+            print(f"AI校验: 未返回有效结果")
+            return text
+            
+    except Exception as e:
+        print(f"AI校验失败: {e}")
+        return text
+
+
+gemini_model = init_gemini()
 
 
 def detect_columns(items, x_thresh=10):
@@ -438,13 +519,14 @@ def capture_full_screen():
     return screenshot
 
 
-def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs):
+def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs, ai_model=None):
     """
-    对合并后的段落进行 OCR 识别
+    对合并后的段落进行 OCR 识别，并使用AI校验结果
     
     参数:
         image_path_or_pil: 原始图片路径或 PIL Image 对象
         merged_paragraphs: 合并后的段落列表
+        ai_model: Gemini AI模型实例（可选）
     
     返回:
         识别后的段落列表，每个段落添加了 'text' 字段
@@ -456,6 +538,10 @@ def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs):
     
     print("\n" + "=" * 80)
     print("开始对合并后的段落进行 OCR 识别...")
+    if ENABLE_AI_CORRECTION and ai_model:
+        print(f"AI校验已启用，最小文本长度: {AI_MIN_TEXT_LENGTH}")
+    else:
+        print("AI校验未启用")
     print("=" * 80)
     
     for i, para in enumerate(merged_paragraphs):
@@ -472,8 +558,12 @@ def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs):
             
             if result and 'text' in result:
                 text = result['text']
+                
+                if ENABLE_AI_CORRECTION and ai_model:
+                    text = correct_text_with_ai(text, ai_model)
+                
                 para['text'] = text
-                print(f"识别结果: {text}")
+                print(f"最终结果: {text}")
             else:
                 print(f"识别失败: API返回结果为空或格式错误")
                 para['text'] = ""
@@ -576,7 +666,7 @@ def on_f4_pressed():
                 merged_image_path = f"./output/merged_{timestamp}.png"
                 draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
 
-            merged_paragraphs = recognize_merged_paragraphs(screenshot, merged_paragraphs)
+            merged_paragraphs = recognize_merged_paragraphs(screenshot, merged_paragraphs, ai_model=gemini_model)
 
             send_ocr_to_server(merged_paragraphs)
 
