@@ -14,6 +14,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from openai import OpenAI
 
 load_dotenv()
 
@@ -30,6 +31,12 @@ SMART_AI_SELECTION_COUNT = 2
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
 AI_TIMEOUT = 14
+
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'gemini')
+OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', '0.7'))
 
 ai_correction_count = 0
 ai_correction_completed = 0
@@ -92,11 +99,33 @@ def init_gemini():
     
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         print("Gemini AI模型初始化成功")
         return model
     except Exception as e:
         print(f"Gemini AI初始化失败: {e}")
+        return None
+
+
+def init_openai():
+    """
+    初始化OpenAI客户端
+    
+    返回:
+        OpenAI客户端实例或None（如果初始化失败）
+    """
+    if not ENABLE_AI_CORRECTION and not SMART_AI_SELECTION_MODE:
+        return None
+    
+    try:
+        client = OpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url=OPENAI_BASE_URL
+        )
+        print(f"OpenAI客户端初始化成功 (base_url: {OPENAI_BASE_URL}, model: {OPENAI_MODEL}, temperature: {OPENAI_TEMPERATURE})")
+        return client
+    except Exception as e:
+        print(f"OpenAI初始化失败: {e}")
         return None
 
 
@@ -124,8 +153,10 @@ def correct_text_with_ai(text, ai_model):
         prompt = f"""
 下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
 1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
-2. 可能含有不属于句子内的干扰单词、符号等，请你删除之后返回完整的德语句子。 
-3. 记得只返回清理后的句子，不许说其他废话
+2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
+3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
+4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
+5. 记得只返回清理后的句子，不许说其他废话
 原始文本：{text}"""
 
         response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
@@ -148,7 +179,83 @@ def correct_text_with_ai(text, ai_model):
         return text
 
 
-gemini_model = init_gemini()
+def correct_text_with_openai(text, openai_client):
+    """
+    使用OpenAI校验和修正OCR识别的文本
+    
+    参数:
+        text: OCR识别的原始文本
+        openai_client: OpenAI客户端实例
+    
+    返回:
+        校正后的文本，如果校验失败则返回原始文本
+    """
+    if not ENABLE_AI_CORRECTION or not openai_client:
+        return text
+    
+    if len(text.strip()) < AI_MIN_TEXT_LENGTH:
+        return text
+    
+    if not text.strip():
+        return text
+    
+    try:
+        prompt = f"""下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
+1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
+2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
+3. 句子的换行，请不要换行，比如第二行是推文正文，虽然ocr视觉上是多行的，但是你识别后就不用换行，
+4. 可能含有不属于句子内的干扰单词、符号、网名等不是德语单词的拉丁单词，请你删除之后返回完整的德语句子。 
+5. 记得只返回清理后的句子，不许说其他废话
+原始文本：{text}"""
+
+        response = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=OPENAI_TEMPERATURE,
+            timeout=AI_TIMEOUT
+        )
+        
+        if response and response.choices and len(response.choices) > 0:
+            corrected_text = response.choices[0].message.content.strip()
+            
+            if corrected_text and corrected_text != text:
+                print(f"OpenAI校验: '{text}' -> '{corrected_text}'")
+                return corrected_text
+            else:
+                print(f"OpenAI校验: 文本无需修正 '{text}'")
+                return text
+        else:
+            print(f"OpenAI校验: 未返回有效结果")
+            return text
+            
+    except Exception as e:
+        print(f"OpenAI校验失败: {e}")
+        return text
+
+
+gemini_model = None
+openai_client = None
+
+if AI_PROVIDER.lower() == 'openai':
+    openai_client = init_openai()
+    if openai_client:
+        ai_model = openai_client
+        print(f"已选择OpenAI作为AI提供商")
+    else:
+        print("OpenAI初始化失败，尝试使用Gemini...")
+        gemini_model = init_gemini()
+        ai_model = gemini_model
+else:
+    gemini_model = init_gemini()
+    if gemini_model:
+        ai_model = gemini_model
+        print(f"已选择Gemini作为AI提供商")
+    else:
+        print("Gemini初始化失败，尝试使用OpenAI...")
+        openai_client = init_openai()
+        ai_model = openai_client
 
 
 def detect_columns(items, x_thresh=10):
@@ -664,7 +771,7 @@ def correct_text_with_ai_async(para, ai_model, callback, force_correction=False)
     
     参数:
         para: 包含OCR文本的段落字典
-        ai_model: Gemini AI模型实例
+        ai_model: Gemini AI模型实例或OpenAI客户端实例
         callback: 完成后的回调函数，接收修正后的段落
         force_correction: 是否强制进行AI纠正（用于智能AI选择模式）
     """
@@ -722,7 +829,10 @@ def correct_text_with_ai_async(para, ai_model, callback, force_correction=False)
         print(f"{para_info} 文本长度({text_length}) >= 最小长度({AI_MIN_TEXT_LENGTH})，开始AI校验: '{text}'")
         
         try:
-            prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
+            if AI_PROVIDER.lower() == 'openai' and openai_client:
+                corrected_text = correct_text_with_openai(text, openai_client)
+            else:
+                prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
 1. 字符混淆（如0和O、1和l、5和S等）
 2. 拼写错误
 3. 标点符号错误
@@ -730,22 +840,21 @@ def correct_text_with_ai_async(para, ai_model, callback, force_correction=False)
 请只返回修正后的文本，不要添加任何解释或额外内容。
 
 原始文本：{text}"""
-
-            response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
-            
-            if response and response.text:
-                corrected_text = response.text.strip()
+                response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
                 
-                if corrected_text and corrected_text != text:
-                    print(f"{para_info} AI校验成功: '{text}' -> '{corrected_text}'")
-                    para['corrected_text'] = corrected_text
-                    callback(para)
+                if response and response.text:
+                    corrected_text = response.text.strip()
                 else:
-                    print(f"{para_info} AI校验: 文本无需修正 '{text}'")
-                    para['corrected_text'] = text
-                    callback(para)
+                    corrected_text = text
+            
+            if corrected_text and corrected_text != text:
+                print(f"{para_info} AI校验成功: '{text}' -> '{corrected_text}'")
+                para['corrected_text'] = corrected_text
+                callback(para)
             else:
-                print(f"{para_info} AI校验: 未返回有效结果，不发送到服务器")
+                print(f"{para_info} AI校验: 文本无需修正 '{text}'")
+                para['corrected_text'] = text
+                callback(para)
                 
         except Exception as e:
             print(f"{para_info} AI校验失败: {e}，不发送到服务器")
