@@ -29,7 +29,7 @@ SMART_AI_SELECTION_MODE = True
 SMART_AI_SELECTION_COUNT = 2
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
-AI_TIMEOUT = 5
+AI_TIMEOUT = 14
 
 ai_correction_count = 0
 ai_correction_completed = 0

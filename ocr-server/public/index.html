@@ -122,9 +122,12 @@
                     box.classList.add('auto-size');
                 }
 
-                const paragraph = document.createElement('p');
-                paragraph.textContent = item.text;
-                box.appendChild(paragraph);
+                const lines = item.text.split(/\r?\n/).filter(line => line.trim() !== '');
+                lines.forEach(line => {
+                    const paragraph = document.createElement('p');
+                    paragraph.textContent = line;
+                    box.appendChild(paragraph);
+                });
 
                 box.id = `text-box-${index}`;
                 container.appendChild(box);
@@ -139,10 +142,13 @@
             const box = textBoxMap.get(key);
 
             if (box) {
-                const paragraph = box.querySelector('p');
-                if (paragraph) {
-                    paragraph.textContent = correctionData.text;
-                }
+                box.innerHTML = '';
+                const lines = correctionData.text.split(/\r?\n/).filter(line => line.trim() !== '');
+                lines.forEach(line => {
+                    const paragraph = document.createElement('p');
+                    paragraph.textContent = line;
+                    box.appendChild(paragraph);
+                });
                 box.classList.add('corrected');
                 console.log('AI纠错更新成功:', correctionData.text);
             } else {
@@ -159,9 +165,12 @@
                     newBox.classList.add('auto-size');
                 }
 
-                const paragraph = document.createElement('p');
-                paragraph.textContent = correctionData.text;
-                newBox.appendChild(paragraph);
+                const lines = correctionData.text.split('\n').filter(line => line.trim() !== '');
+                lines.forEach(line => {
+                    const paragraph = document.createElement('p');
+                    paragraph.textContent = line;
+                    newBox.appendChild(paragraph);
+                });
 
                 container.appendChild(newBox);
                 textBoxMap.set(key, newBox);
