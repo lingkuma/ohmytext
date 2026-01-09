@@ -28,6 +28,10 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
 AI_TIMEOUT = 5
 
+ai_correction_count = 0
+ai_correction_completed = 0
+ai_correction_lock = threading.Lock()
+
 
 def image_to_base64(image_path_or_pil):
     if isinstance(image_path_or_pil, str):
@@ -527,6 +531,10 @@ def send_ai_correction_to_server(para):
     adjusted_y = y1 - STATUS_BAR_HEIGHT
 
     text = para.get('corrected_text', para.get('text', ''))
+    original_text = para.get('text', '')
+    
+    x1, y1, x2, y2 = para["box"]
+    para_info = f"段落[({int(x1)},{int(y1)})]"
 
     text_data = {
         'x': x1,
@@ -544,14 +552,17 @@ def send_ai_correction_to_server(para):
 
         if response.status_code == 200:
             result = response.json()
-            print(f"AI纠错数据已成功发送到服务器")
+            if text != original_text:
+                print(f"{para_info} 发送AI纠错数据: '{original_text}' -> '{text}'")
+            else:
+                print(f"{para_info} 发送AI纠错数据: '{text}' (无修正)")
             return True
         else:
-            print(f"发送AI纠错数据失败: HTTP {response.status_code}")
+            print(f"{para_info} 发送AI纠错数据失败: HTTP {response.status_code}")
             return False
 
     except requests.exceptions.RequestException as e:
-        print(f"发送AI纠错数据时出错: {e}")
+        print(f"{para_info} 发送AI纠错数据时出错: {e}")
         return False
 
 
@@ -622,6 +633,15 @@ def recognize_merged_paragraphs_concurrent(image_path_or_pil, merged_paragraphs)
                 print(f"段落处理异常: {e}")
     
     print(f"\n并发OCR识别完成，共处理 {len(merged_paragraphs)} 个段落")
+    
+    print("\n" + "=" * 80)
+    print("OCR识别结果详情：")
+    print("=" * 80)
+    for i, para in enumerate(merged_paragraphs):
+        text = para.get('text', '')
+        print(f"段落 {i+1}: '{text}' (长度: {len(text)})")
+    print("=" * 80 + "\n")
+    
     return merged_paragraphs
 
 
@@ -634,20 +654,31 @@ def correct_text_with_ai_async(para, ai_model, callback):
         ai_model: Gemini AI模型实例
         callback: 完成后的回调函数，接收修正后的段落
     """
+    global ai_correction_count, ai_correction_completed
+    
     def _correct():
+        global ai_correction_completed
+        
         text = para.get('text', '')
+        text_stripped = text.strip()
+        text_length = len(text_stripped)
+        
+        x1, y1, x2, y2 = para["box"]
+        para_info = f"段落[({int(x1)},{int(y1)})]"
         
         if not ENABLE_AI_CORRECTION or not ai_model:
-            callback(para)
+            print(f"{para_info} AI校验已禁用，跳过: '{text}'")
             return
         
-        if len(text.strip()) < AI_MIN_TEXT_LENGTH:
-            callback(para)
+        if not text_stripped:
+            print(f"{para_info} 文本为空，跳过AI校验")
             return
         
-        if not text.strip():
-            callback(para)
+        if text_length < AI_MIN_TEXT_LENGTH:
+            print(f"{para_info} 文本长度({text_length}) < 最小长度({AI_MIN_TEXT_LENGTH})，跳过AI校验: '{text}'")
             return
+        
+        print(f"{para_info} 文本长度({text_length}) >= 最小长度({AI_MIN_TEXT_LENGTH})，开始AI校验: '{text}'")
         
         try:
             prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
@@ -665,20 +696,33 @@ def correct_text_with_ai_async(para, ai_model, callback):
                 corrected_text = response.text.strip()
                 
                 if corrected_text and corrected_text != text:
-                    print(f"AI校验: '{text}' -> '{corrected_text}'")
+                    print(f"{para_info} AI校验成功: '{text}' -> '{corrected_text}'")
                     para['corrected_text'] = corrected_text
                 else:
-                    print(f"AI校验: 文本无需修正 '{text}'")
+                    print(f"{para_info} AI校验: 文本无需修正 '{text}'")
                     para['corrected_text'] = text
             else:
-                print(f"AI校验: 未返回有效结果")
+                print(f"{para_info} AI校验: 未返回有效结果")
                 para['corrected_text'] = text
                 
         except Exception as e:
-            print(f"AI校验失败: {e}")
+            print(f"{para_info} AI校验失败: {e}")
             para['corrected_text'] = text
         
         callback(para)
+        
+        with ai_correction_lock:
+            ai_correction_completed += 1
+            if ai_correction_completed >= ai_correction_count:
+                print("\n" + "=" * 80)
+                print("全屏OCR识别完成！")
+                print("OCR数据已发送到服务器，浏览器页面会自动更新")
+                print("AI纠错已全部完成，已修正的文本会显示为绿色")
+                print("按F4键可以重新识别并更新页面")
+                print("=" * 80 + "\n")
+    
+    with ai_correction_lock:
+        ai_correction_count += 1
     
     thread = threading.Thread(target=_correct)
     thread.daemon = True
@@ -744,6 +788,11 @@ def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
 
 
 def on_f4_pressed():
+    global ai_correction_count, ai_correction_completed
+    
+    ai_correction_count = 0
+    ai_correction_completed = 0
+    
     print("\n=== F4 按下，开始全屏OCR识别 ===")
 
     screenshot = capture_full_screen()
@@ -800,13 +849,6 @@ def on_f4_pressed():
 
             for para in merged_paragraphs:
                 correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server)
-
-            print("\n" + "=" * 80)
-            print("全屏OCR识别完成！")
-            print("OCR数据已发送到服务器，浏览器页面会自动更新")
-            print("AI纠错正在后台进行，完成后会自动更新页面显示为绿色文本")
-            print("按F4键可以重新识别并更新页面")
-            print("=" * 80)
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
 
