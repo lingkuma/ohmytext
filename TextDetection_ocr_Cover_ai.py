@@ -12,6 +12,8 @@ import io
 from paddleocr import TextDetection
 import google.generativeai as genai
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 load_dotenv()
 
@@ -495,7 +497,7 @@ def send_ocr_to_server(merged_paragraphs):
             'text': text
         })
 
-    api_url = 'http://127.0.0.1:3000/api/update-ocr'
+    api_url = 'http://127.0.0.1:8080/api/update-ocr'
 
     try:
         response = requests.post(api_url, json=text_data, headers={'Content-Type': 'application/json'})
@@ -513,6 +515,46 @@ def send_ocr_to_server(merged_paragraphs):
         return False
 
 
+def send_ai_correction_to_server(para):
+    """
+    将AI纠错后的单个段落数据发送到Node.js服务器
+
+    参数:
+        para: 包含AI纠错文本的段落字典
+    """
+    x1, y1, x2, y2 = para["box"]
+
+    adjusted_y = y1 - STATUS_BAR_HEIGHT
+
+    text = para.get('corrected_text', para.get('text', ''))
+
+    text_data = {
+        'x': x1,
+        'y': adjusted_y,
+        'width': x2 - x1,
+        'height': y2 - y1,
+        'text': text,
+        'is_corrected': True
+    }
+
+    api_url = 'http://127.0.0.1:8080/api/update-ocr-correction'
+
+    try:
+        response = requests.post(api_url, json=text_data, headers={'Content-Type': 'application/json'})
+
+        if response.status_code == 200:
+            result = response.json()
+            print(f"AI纠错数据已成功发送到服务器")
+            return True
+        else:
+            print(f"发送AI纠错数据失败: HTTP {response.status_code}")
+            return False
+
+    except requests.exceptions.RequestException as e:
+        print(f"发送AI纠错数据时出错: {e}")
+        return False
+
+
 def capture_full_screen():
     """
     全屏截图
@@ -524,14 +566,13 @@ def capture_full_screen():
     return screenshot
 
 
-def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs, ai_model=None):
+def recognize_merged_paragraphs_concurrent(image_path_or_pil, merged_paragraphs):
     """
-    对合并后的段落进行 OCR 识别，并使用AI校验结果
+    对合并后的段落进行并发 OCR 识别（不包含AI校验）
     
     参数:
         image_path_or_pil: 原始图片路径或 PIL Image 对象
         merged_paragraphs: 合并后的段落列表
-        ai_model: Gemini AI模型实例（可选）
     
     返回:
         识别后的段落列表，每个段落添加了 'text' 字段
@@ -542,44 +583,121 @@ def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs, ai_model=N
         image = image_path_or_pil
     
     print("\n" + "=" * 80)
-    print("开始对合并后的段落进行 OCR 识别...")
-    if ENABLE_AI_CORRECTION and ai_model:
-        print(f"AI校验已启用，最小文本长度: {AI_MIN_TEXT_LENGTH}")
-    else:
-        print("AI校验未启用")
+    print("开始对合并后的段落进行并发 OCR 识别...")
     print("=" * 80)
     
-    for i, para in enumerate(merged_paragraphs):
+    def recognize_single_paragraph(para, image):
         x1, y1, x2, y2 = para["box"]
-        
         cropped_image = image.crop((x1, y1, x2, y2))
-        
-        print(f"\n【段落 {i+1}】")
-        print(f"裁切区域: x1={x1:.1f}, y1={y1:.1f}, x2={x2:.1f}, y2={y2:.1f}")
-        print(f"裁切尺寸: {cropped_image.size[0]}x{cropped_image.size[1]}")
         
         try:
             result = call_luna_ocr_api(cropped_image)
             
             if result and 'text' in result:
                 text = result['text']
-                
-                if ENABLE_AI_CORRECTION and ai_model:
-                    text = correct_text_with_ai(text, ai_model)
-                
                 para['text'] = text
-                print(f"最终结果: {text}")
             else:
-                print(f"识别失败: API返回结果为空或格式错误")
                 para['text'] = ""
+        except Exception as e:
+            print(f"段落识别失败: {e}")
+            para['text'] = ""
+        
+        return para
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_para = {
+            executor.submit(recognize_single_paragraph, para.copy(), image): para
+            for para in merged_paragraphs
+        }
+        
+        for future in as_completed(future_to_para):
+            para = future_to_para[future]
+            try:
+                result_para = future.result()
+                for i, original_para in enumerate(merged_paragraphs):
+                    if original_para["box"] == result_para["box"]:
+                        merged_paragraphs[i] = result_para
+                        break
+            except Exception as e:
+                print(f"段落处理异常: {e}")
+    
+    print(f"\n并发OCR识别完成，共处理 {len(merged_paragraphs)} 个段落")
+    return merged_paragraphs
+
+
+def correct_text_with_ai_async(para, ai_model, callback):
+    """
+    异步使用AI校验和修正OCR识别的文本
+    
+    参数:
+        para: 包含OCR文本的段落字典
+        ai_model: Gemini AI模型实例
+        callback: 完成后的回调函数，接收修正后的段落
+    """
+    def _correct():
+        text = para.get('text', '')
+        
+        if not ENABLE_AI_CORRECTION or not ai_model:
+            callback(para)
+            return
+        
+        if len(text.strip()) < AI_MIN_TEXT_LENGTH:
+            callback(para)
+            return
+        
+        if not text.strip():
+            callback(para)
+            return
+        
+        try:
+            prompt = f"""请修正以下OCR识别的文本中的错误。OCR识别经常会出现以下问题：
+1. 字符混淆（如0和O、1和l、5和S等）
+2. 拼写错误
+3. 标点符号错误
+
+请只返回修正后的文本，不要添加任何解释或额外内容。
+
+原始文本：{text}"""
+
+            response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
+            
+            if response and response.text:
+                corrected_text = response.text.strip()
+                
+                if corrected_text and corrected_text != text:
+                    print(f"AI校验: '{text}' -> '{corrected_text}'")
+                    para['corrected_text'] = corrected_text
+                else:
+                    print(f"AI校验: 文本无需修正 '{text}'")
+                    para['corrected_text'] = text
+            else:
+                print(f"AI校验: 未返回有效结果")
+                para['corrected_text'] = text
                 
         except Exception as e:
-            print(f"识别失败: {e}")
-            import traceback
-            traceback.print_exc()
-            para['text'] = ""
+            print(f"AI校验失败: {e}")
+            para['corrected_text'] = text
+        
+        callback(para)
     
-    return merged_paragraphs
+    thread = threading.Thread(target=_correct)
+    thread.daemon = True
+    thread.start()
+
+
+def recognize_merged_paragraphs(image_path_or_pil, merged_paragraphs, ai_model=None):
+    """
+    对合并后的段落进行 OCR 识别，并使用AI校验结果（已废弃，使用并发版本）
+    
+    参数:
+        image_path_or_pil: 原始图片路径或 PIL Image 对象
+        merged_paragraphs: 合并后的段落列表
+        ai_model: Gemini AI模型实例（可选）
+    
+    返回:
+        识别后的段落列表，每个段落添加了 'text' 字段
+    """
+    return recognize_merged_paragraphs_concurrent(image_path_or_pil, merged_paragraphs)
 
 
 def find_paragraph_under_mouse(merged_paragraphs, mouse_x, mouse_y):
@@ -671,13 +789,22 @@ def on_f4_pressed():
                 merged_image_path = f"./output/merged_{timestamp}.png"
                 draw_merged_paragraphs(screenshot_path, merged_paragraphs, merged_image_path)
 
-            merged_paragraphs = recognize_merged_paragraphs(screenshot, merged_paragraphs, ai_model=gemini_model)
+            merged_paragraphs = recognize_merged_paragraphs_concurrent(screenshot, merged_paragraphs)
 
             send_ocr_to_server(merged_paragraphs)
 
             print("\n" + "=" * 80)
+            print("OCR识别完成！数据已发送到服务器")
+            print("开始AI纠错（后台异步处理）...")
+            print("=" * 80)
+
+            for para in merged_paragraphs:
+                correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server)
+
+            print("\n" + "=" * 80)
             print("全屏OCR识别完成！")
             print("OCR数据已发送到服务器，浏览器页面会自动更新")
+            print("AI纠错正在后台进行，完成后会自动更新页面显示为绿色文本")
             print("按F4键可以重新识别并更新页面")
             print("=" * 80)
         else:

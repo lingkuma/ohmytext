@@ -36,6 +36,10 @@
             max-width: 100%;
         }
 
+        .text-box.corrected {
+            color: #008000;
+        }
+
         .text-box::-webkit-scrollbar {
             width: 6px;
         }
@@ -86,9 +90,15 @@
     <script>
         const container = document.getElementById('text-container');
         const status = document.getElementById('status');
+        let textBoxMap = new Map();
+
+        function getTextBoxKey(x, y, width, height) {
+            return `${x}-${y}-${width}-${height}`;
+        }
 
         function renderTextBoxes(data) {
             container.innerHTML = '';
+            textBoxMap.clear();
 
             if (!data || data.length === 0) {
                 return;
@@ -108,11 +118,43 @@
 
                 box.id = `text-box-${index}`;
                 container.appendChild(box);
+
+                const key = getTextBoxKey(item.x, item.y, item.width, item.height);
+                textBoxMap.set(key, box);
             });
         }
 
+        function updateSingleTextBox(correctionData) {
+            const key = getTextBoxKey(correctionData.x, correctionData.y, correctionData.width, correctionData.height);
+            const box = textBoxMap.get(key);
+
+            if (box) {
+                const paragraph = box.querySelector('p');
+                if (paragraph) {
+                    paragraph.textContent = correctionData.text;
+                }
+                box.classList.add('corrected');
+                console.log('AI纠错更新成功:', correctionData.text);
+            } else {
+                console.log('未找到对应的文本框，创建新的');
+                const newBox = document.createElement('div');
+                newBox.className = 'text-box corrected';
+                newBox.style.left = correctionData.x + 'px';
+                newBox.style.top = correctionData.y + 'px';
+                newBox.style.width = correctionData.width + 'px';
+                newBox.style.height = correctionData.height + 'px';
+
+                const paragraph = document.createElement('p');
+                paragraph.textContent = correctionData.text;
+                newBox.appendChild(paragraph);
+
+                container.appendChild(newBox);
+                textBoxMap.set(key, newBox);
+            }
+        }
+
         function connectWebSocket() {
-            const ws = new WebSocket('ws://localhost:3000');
+            const ws = new WebSocket('ws://localhost:8080');
 
             ws.onopen = () => {
                 console.log('WebSocket已连接');
@@ -125,6 +167,9 @@
                 if (message.type === 'update') {
                     console.log('收到OCR数据更新，文本区域数量:', message.data.length);
                     renderTextBoxes(message.data);
+                } else if (message.type === 'correction') {
+                    console.log('收到AI纠错数据更新:', message.data);
+                    updateSingleTextBox(message.data);
                 }
             };
 

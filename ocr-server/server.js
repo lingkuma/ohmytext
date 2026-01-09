@@ -39,11 +39,24 @@ app.post('/api/update-ocr', (req, res) => {
   res.json({ success: true, message: 'OCR数据已更新' });
 });
 
+app.post('/api/update-ocr-correction', (req, res) => {
+  const correctionData = req.body;
+  console.log('收到AI纠错数据更新:', correctionData);
+
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'correction', data: correctionData }));
+    }
+  });
+
+  res.json({ success: true, message: 'AI纠错数据已更新' });
+});
+
 app.get('/api/ocr-data', (req, res) => {
   res.json(latestOCRData || []);
 });
 
-const PORT = 3000;
+const PORT = 8080;
 server.listen(PORT, () => {
   console.log(`OCR服务器运行在 http://localhost:${PORT}`);
   console.log(`WebSocket服务运行在 ws://localhost:${PORT}`);
