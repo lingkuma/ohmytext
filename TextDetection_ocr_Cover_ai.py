@@ -577,10 +577,17 @@ def send_ocr_to_server(merged_paragraphs):
             'merged_lines': merged_lines
         })
 
-    api_url = 'http://127.0.0.1:8080/api/update-ocr'
+    api_url = 'http://127.0.0.1:2334/api/update-ocr'
 
     try:
+        print(f'[DEBUG] 准备发送OCR数据到: {api_url}')
+        print(f'[DEBUG] 数据条数: {len(text_data)}')
+        print(f'[DEBUG] 请求方法: POST')
+        
         response = requests.post(api_url, json=text_data, headers={'Content-Type': 'application/json'})
+        
+        print(f'[DEBUG] 响应状态码: {response.status_code}')
+        print(f'[DEBUG] 响应内容: {response.text[:200] if response.text else "无内容"}')
 
         if response.status_code == 200:
             result = response.json()
@@ -627,7 +634,7 @@ def send_ai_correction_to_server(para):
         'merged_lines': merged_lines
     }
 
-    api_url = 'http://127.0.0.1:8080/api/update-ocr-correction'
+    api_url = 'http://127.0.0.1:2334/api/update-ocr-correction'
 
     try:
         response = requests.post(api_url, json=text_data, headers={'Content-Type': 'application/json'})
@@ -676,9 +683,16 @@ def send_cropped_screenshot_to_server(screenshot):
             'Content-Type': 'application/json'
         }
 
-        api_url = 'http://127.0.0.1:8080/api/update-screenshot'
+        api_url = 'http://127.0.0.1:2334/api/update-screenshot'
+
+        print(f'[DEBUG] 准备发送截图到: {api_url}')
+        print(f'[DEBUG] 图片数据长度: {len(base64_image)}')
+        print(f'[DEBUG] 请求方法: POST')
 
         response = requests.post(api_url, data=json.dumps(payload), headers=headers, timeout=10)
+        
+        print(f'[DEBUG] 响应状态码: {response.status_code}')
+        print(f'[DEBUG] 响应内容: {response.text[:200] if response.text else "无内容"}')
 
         if response.status_code == 200:
             result = response.json()

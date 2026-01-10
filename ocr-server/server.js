@@ -14,6 +14,11 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - ${req.ip}`);
+  next();
+});
+
 let latestOCRData = null;
 let latestScreenshot = null;
 
@@ -30,6 +35,10 @@ wss.on('connection', (ws) => {
 });
 
 app.post('/api/update-ocr', (req, res) => {
+  console.log('[DEBUG] /api/update-ocr 接收到请求');
+  console.log('[DEBUG] 请求体类型:', typeof req.body);
+  console.log('[DEBUG] 请求体是否为数组:', Array.isArray(req.body));
+  
   latestOCRData = req.body;
   console.log('收到OCR数据更新，文本区域数量:', latestOCRData.length);
 
@@ -60,9 +69,14 @@ app.get('/api/ocr-data', (req, res) => {
 });
 
 app.post('/api/update-screenshot', (req, res) => {
+  console.log('[DEBUG] /api/update-screenshot 接收到请求');
+  console.log('[DEBUG] 请求体包含image字段:', 'image' in req.body);
+  console.log('[DEBUG] image数据长度:', req.body.image ? req.body.image.length : 0);
+  
   const imageData = req.body.image;
   
   if (!imageData) {
+    console.log('[DEBUG] 未接收到图片数据');
     return res.status(400).json({ success: false, message: '未接收到图片数据' });
   }
   
@@ -82,7 +96,12 @@ app.get('/api/screenshot', (req, res) => {
   res.json({ image: latestScreenshot });
 });
 
-const PORT = 8080;
+app.use((req, res) => {
+  console.log('[DEBUG] 404 - 未找到路由:', req.method, req.url);
+  res.status(404).json({ error: 'Not Found', path: req.url });
+});
+
+const PORT = 2334;
 server.listen(PORT, () => {
   console.log(`OCR服务器运行在 http://localhost:${PORT}`);
   console.log(`WebSocket服务运行在 ws://localhost:${PORT}`);
