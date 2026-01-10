@@ -21,6 +21,7 @@ load_dotenv()
 model = TextDetection(model_name="PP-OCRv5_server_det")
 
 save_debug_images = False
+# 状态栏高度，默认71px(请修改为23px，或者你的状态机高度。这里用作位置校准和背景图片裁切)
 STATUS_BAR_HEIGHT = 71
 
 # 是否发送裁剪后的截图到网页

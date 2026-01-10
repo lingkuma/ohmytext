@@ -1,7 +1,7 @@
 output/
 test_img/
 result/
-*.png
 __pycache__/
 .env
 node_modules/
+test/
