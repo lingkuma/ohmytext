@@ -23,17 +23,26 @@ model = TextDetection(model_name="PP-OCRv5_server_det")
 save_debug_images = False
 STATUS_BAR_HEIGHT = 71
 
+# 是否发送裁剪后的截图到网页
 SEND_CROPPED_SCREENSHOT = True
-
+# 是否开启全局AI修正
 ENABLE_AI_CORRECTION = False
+# 开启全局AI修正后，激活的最小文本长度
 AI_MIN_TEXT_LENGTH = 10
 
+# 是否开启智能AI修正，修正距离鼠标最新的SMART_AI_SELECTION_COUNT个文本框
 SMART_AI_SELECTION_MODE = True
+# 智能AI修正模式下，选择的最近的文本框数量
 SMART_AI_SELECTION_COUNT = 5
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
-AI_TIMEOUT = 14
 
+# AI相关配置
+# 配置Gemini API密钥
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+# OCR超时时间
+OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', 10))
+# AI超时时间
+AI_TIMEOUT = 14
+# AI校验prompt
 AI_CORRECTION_PROMPT = """下面收到的文本是用户通过OCR获取的德语句子，请按照一下要求，进行验证和清理：
 1. ocr可能会丢失öü，或将ß识别成B，请将错误的德语单词纠正；
 2. 格式的换行，请保持换行符，比如第一行是用户名，第二行是用户的推文正文
@@ -42,10 +51,16 @@ AI_CORRECTION_PROMPT = """下面收到的文本是用户通过OCR获取的德语
 5. 记得只返回清理后的句子，不许说其他废话
 原始文本：{text}"""
 
+# AI提供商，可选值：gemini, openai
+# AI 服务提供商，支持 gemini / openai，默认优先使用 gemini
 AI_PROVIDER = os.getenv('AI_PROVIDER', 'gemini')
+# OpenAI 接口的基础 URL，默认官方地址，可替换为第三方代理
 OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+# OpenAI API 密钥，用于调用 GPT 系列模型
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+# 指定使用的 OpenAI 模型，默认 gpt-4o-mini 以平衡速度与质量
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+# 生成文本时的采样温度，值越小结果越确定，默认 0.7 保持适度多样性
 OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', '0.7'))
 
 ai_correction_count = 0
