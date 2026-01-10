@@ -139,7 +139,7 @@ def init_openai():
         return None
 
 
-def correct_text_with_openai(text, openai_client, prompt=None):
+def correct_text_with_openai(text, openai_client, prompt=None, force_correction=False):
     """
     使用OpenAI校验和修正OCR识别的文本
     
@@ -147,11 +147,12 @@ def correct_text_with_openai(text, openai_client, prompt=None):
         text: OCR识别的原始文本
         openai_client: OpenAI客户端实例
         prompt: 自定义prompt，如果为None则使用默认的AI_CORRECTION_PROMPT
+        force_correction: 是否强制进行AI纠正（用于智能AI选择模式）
     
     返回:
         校正后的文本，如果校验失败则返回原始文本
     """
-    if not ENABLE_AI_CORRECTION or not openai_client:
+    if not force_correction and (not ENABLE_AI_CORRECTION or not openai_client):
         return text
     
     if len(text.strip()) < AI_MIN_TEXT_LENGTH:
@@ -166,6 +167,7 @@ def correct_text_with_openai(text, openai_client, prompt=None):
         elif '{text}' in prompt:
             prompt = prompt.format(text=text)
         
+        print(f"发送给OpenAI的Prompt: {prompt}")
         response = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
@@ -175,8 +177,10 @@ def correct_text_with_openai(text, openai_client, prompt=None):
             timeout=AI_TIMEOUT
         )
         
+        print(f"OpenAI原始响应: {response}")
         if response and response.choices and len(response.choices) > 0:
-            corrected_text = response.choices[0].message.content.strip()
+            corrected_text = response.choices[0].message.content
+            print(f"OpenAI返回的文本: '{corrected_text}'")
             
             if corrected_text and corrected_text != text:
                 print(f"OpenAI校验: '{text}' -> '{corrected_text}'")
@@ -836,17 +840,24 @@ def correct_text_with_ai_async(para, ai_model, callback, force_correction=False)
             return
         
         print(f"{para_info} 文本长度({text_length}) >= 最小长度({AI_MIN_TEXT_LENGTH})，开始AI校验: '{text}'")
+        print(f"{para_info} AI_PROVIDER: {AI_PROVIDER}, openai_client: {openai_client is not None}, ai_model: {ai_model is not None}")
         
         try:
             if AI_PROVIDER.lower() == 'openai' and openai_client:
-                corrected_text = correct_text_with_openai(text, openai_client)
+                print(f"{para_info} 使用OpenAI进行校验")
+                corrected_text = correct_text_with_openai(text, openai_client, force_correction=force_correction)
             else:
+                print(f"{para_info} 使用Gemini进行校验 (AI_PROVIDER={AI_PROVIDER}, openai_client={openai_client is not None})")
                 prompt = AI_CORRECTION_PROMPT.format(text=text)
+                print(f"{para_info} 发送给Gemini的Prompt: {prompt}")
                 response = ai_model.generate_content(prompt, request_options={'timeout': AI_TIMEOUT})
                 
-                if response and response.text:
-                    corrected_text = response.text.strip()
+                print(f"{para_info} Gemini原始响应: {response}")
+                if response and hasattr(response, 'text'):
+                    print(f"{para_info} Gemini返回的文本: '{response.text}'")
+                    corrected_text = response.text
                 else:
+                    print(f"{para_info} Gemini未返回有效文本")
                     corrected_text = text
             
             if corrected_text and corrected_text != text:
@@ -1051,7 +1062,7 @@ def on_f4_pressed():
                 print("=" * 80)
                 
                 for para in selected_paras:
-                    correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server, force_correction=True)
+                    correct_text_with_ai_async(para.copy(), ai_model, send_ai_correction_to_server, force_correction=True)
             else:
                 print("\n" + "=" * 80)
                 print("OCR识别完成！数据已发送到服务器")
@@ -1059,7 +1070,7 @@ def on_f4_pressed():
                 print("=" * 80)
 
                 for para in merged_paragraphs:
-                    correct_text_with_ai_async(para.copy(), gemini_model, send_ai_correction_to_server)
+                    correct_text_with_ai_async(para.copy(), ai_model, send_ai_correction_to_server)
         else:
             print("\n警告: 检测结果不包含 dt_polys 信息，无法应用分列合并算法")
 
