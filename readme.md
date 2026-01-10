@@ -1,9 +1,13 @@
 # Ohmytext
-通过paddleocr识别游戏截图中的文本每行位置，将行距离较近的合并为更大的矩形，然后裁切后将其发送给Lunatranslator的OCR API返回到网页中对应的位置，最后通过AI对识别到的文本进行修正。
+通过paddleocr识别游戏截图中的文本每行位置，将行距离较近的合并为更大的矩形，然后裁切后将其发送给Lunatranslator的OCR API进行OCR返回文本，然后根据矩形位置在网页中生成对应的矩形，并把OCR的文本插入其中，最后通过AI对识别到的文本进行修正。
 最终实现纯OCR方案的游戏文本识别覆盖层。
 
 # paddle识别结果和合并展示
+## TextDetection_ocr_debug.py
+![](./asset/TextDetection.png)
 
+## 算法合并
+![](./asset/Merge_detection.png)
 
 # 游戏中使用效果展示
 ## 游戏截图
