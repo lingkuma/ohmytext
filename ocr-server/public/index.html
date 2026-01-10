@@ -19,6 +19,18 @@
             position: relative;
         }
 
+        #background-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            background-size: cover;
+            background-position: top left;
+            background-repeat: no-repeat;
+        }
+
         .text-box {
             position: absolute;
             background-color: #ffffff;
@@ -34,6 +46,7 @@
             border: 1px solid #e0e0e0;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             max-width: 100%;
+            z-index: 1;
         }
 
         .text-box.auto-size {
@@ -89,12 +102,14 @@
     </style>
 </head>
 <body>
+    <div id="background-image"></div>
     <div id="text-container"></div>
     <div id="status" class="status disconnected">未连接</div>
 
     <script>
         const container = document.getElementById('text-container');
         const status = document.getElementById('status');
+        const backgroundImage = document.getElementById('background-image');
         let textBoxMap = new Map();
 
         function getTextBoxKey(x, y, width, height) {
@@ -177,6 +192,18 @@
             }
         }
 
+        function updateBackgroundImage(base64Image) {
+            console.log('updateBackgroundImage 被调用，base64Image 长度:', base64Image ? base64Image.length : 0);
+            if (base64Image) {
+                const dataUrl = `url('data:image/png;base64,${base64Image}')`;
+                console.log('设置背景图片，数据URL前缀:', dataUrl.substring(0, 50) + '...');
+                backgroundImage.style.backgroundImage = dataUrl;
+                console.log('背景图片已设置，当前背景:', backgroundImage.style.backgroundImage.substring(0, 50) + '...');
+            } else {
+                console.log('base64Image 为空，不设置背景图片');
+            }
+        }
+
         function connectWebSocket() {
             const ws = new WebSocket('ws://localhost:8080');
 
@@ -194,6 +221,9 @@
                 } else if (message.type === 'correction') {
                     console.log('收到AI纠错数据更新:', message.data);
                     updateSingleTextBox(message.data);
+                } else if (message.type === 'screenshot') {
+                    console.log('收到截图更新');
+                    updateBackgroundImage(message.data);
                 }
             };
 

@@ -23,6 +23,8 @@ model = TextDetection(model_name="PP-OCRv5_server_det")
 save_debug_images = False
 STATUS_BAR_HEIGHT = 71
 
+SEND_CROPPED_SCREENSHOT = True
+
 ENABLE_AI_CORRECTION = False
 AI_MIN_TEXT_LENGTH = 10
 
@@ -642,6 +644,57 @@ def send_ai_correction_to_server(para):
         return False
 
 
+def send_cropped_screenshot_to_server(screenshot):
+    """
+    将裁剪后的截图发送到Node.js服务器作为背景图片
+
+    参数:
+        screenshot: PIL Image 对象（全屏截图）
+    """
+    if not SEND_CROPPED_SCREENSHOT:
+        return False
+
+    width, height = screenshot.size
+
+    cropped_screenshot = screenshot.crop((0, STATUS_BAR_HEIGHT, width, height))
+
+    try:
+        img_byte_arr = io.BytesIO()
+        cropped_screenshot.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+        base64_image = base64.b64encode(img_byte_arr).decode('utf-8')
+
+        payload = {
+            'image': base64_image
+        }
+
+        headers = {
+            'Content-Type': 'application/json'
+        }
+
+        api_url = 'http://127.0.0.1:8080/api/update-screenshot'
+
+        response = requests.post(api_url, data=json.dumps(payload), headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            result = response.json()
+            print(f"裁剪后的截图已成功发送到服务器")
+            return True
+        else:
+            print(f"发送裁剪后的截图失败: HTTP {response.status_code}")
+            return False
+
+    except requests.exceptions.Timeout:
+        print(f'发送裁剪后的截图超时')
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f'发送裁剪后的截图时出错: {e}')
+        return False
+    except Exception as e:
+        print(f'发送裁剪后的截图时发生错误: {e}')
+        return False
+
+
 def capture_full_screen():
     """
     全屏截图
@@ -982,6 +1035,7 @@ def on_f4_pressed():
 
             merged_paragraphs = recognize_merged_paragraphs_concurrent(screenshot, merged_paragraphs)
 
+            send_cropped_screenshot_to_server(screenshot)
             send_ocr_to_server(merged_paragraphs)
 
             selected_paras = None

@@ -3,16 +3,19 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const cors = require('cors');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 let latestOCRData = null;
+let latestScreenshot = null;
 
 wss.on('connection', (ws) => {
   console.log('客户端已连接');
@@ -54,6 +57,29 @@ app.post('/api/update-ocr-correction', (req, res) => {
 
 app.get('/api/ocr-data', (req, res) => {
   res.json(latestOCRData || []);
+});
+
+app.post('/api/update-screenshot', (req, res) => {
+  const imageData = req.body.image;
+  
+  if (!imageData) {
+    return res.status(400).json({ success: false, message: '未接收到图片数据' });
+  }
+  
+  latestScreenshot = imageData;
+  console.log('收到截图更新');
+  
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'screenshot', data: imageData }));
+    }
+  });
+  
+  res.json({ success: true, message: '截图已更新' });
+});
+
+app.get('/api/screenshot', (req, res) => {
+  res.json({ image: latestScreenshot });
 });
 
 const PORT = 8080;
